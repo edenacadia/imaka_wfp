@@ -1,41 +1,31 @@
-## estr_pipeline.py
+## wfp_pipeline.py
 ## Eden McEwen
-## Created: April 5th 2020
-# a pipeline structure for the radial estimator code. 
+## Created: June 15th 2020
+## Edited: June 25th 2020
+## UH REU
+# This file takes in a text file of dates, finds them on ehu, and then returns correlation outputs
 
 import os
 import sys
 import fnmatch
 
+import logging
+import threading
 import time
-import numpy as np
-import pandas as pd
+import concurrent.futures
 
-# Personal code
+sys.path.append('/home/emcewen/code_dev')
+from pipeline.cor_pipeline import *
+from pipeline.code.log_ex import *
 from pipeline.code.file_reader import *
-import pipeline.code.Estimator as est
-import pipeline.code.Estimator_R as estr
 
-# Filepath defaults
-# updated with fn set_global_paths
 data_path = "../"
 out_path = "../"
 target_path = "../"
 pipe_f = "pipe_iteration"
-#parallel = False
-
-########################## Estimator Cluster
-# preserving old file names
-def df_iterator(df, xcor=False, sub_len=5, sig=3, thresh=3, c_size=4):
-    return est.df_iterator(df, xcor=False, sub_len=5, sig=3, thresh=3, c_size=4)
-
-def df_iterator_mult(df, sl_list, sig_list, thresh_list, c_list):
-    return est.df_iterator_mult(df, sl_list, sig_list, thresh_list, c_list)
-
-
-########################## Estimator Radial
-
-########################### PIPELINE #########################
+parallel = False
+        
+########################### PIPELINE INITS #########################
     
 def pipe_run(pipe_funct, names, d_files, o_dirs, t_files):
     """ 
@@ -44,7 +34,7 @@ def pipe_run(pipe_funct, names, d_files, o_dirs, t_files):
         generates: whatever cor_pipeline function called
         output: none
     """
-    logging.info("============ STARTING %s ============")
+    logging.info("============ STARTING RUN ============")
     start = time.time()
     
     for i, f in enumerate(d_files):
@@ -59,9 +49,32 @@ def pipe_run(pipe_funct, names, d_files, o_dirs, t_files):
         logging.info("==|==|==|==|==|==> TIME SO FAR: %s"% (time.time() - start))
         
     logging.info("============ RUN FINISHED IN: %s ============"%(time.time() - start))
+
     
-########################### PIPELINE ITERS #########################    
+def pipe_run_parallel(pipe_funct, names, d_files, o_dirs, t_files):
+    """ 
+    Applying Pipeline code in parallel threads
+    Uses executor to map 5 workers to each call of pipe iteration
+        input: lists of names, data paths, output dirs, target paths
+        generates: whatever cor_pipeline function called
+        output: none
+    """
+    num_files = len(d_files)
+    logging.info("============ STARTING THREAD RUN ============")
+    logging.info("BEGIN THREADS")
+    threaded_start = time.time()
     
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        executor.map(pipe_iteration, range(num_files), names, d_files, o_dirs, t_files)
+    
+    logging.info("END THREADS")
+    time_diff = time.time() - threaded_start
+    logging.info("THREAD Time: %s", str(time_diff))
+    
+
+########################### PIPE ITERS #########################
+
+
 def pipe_iteration(i, name, data_f, out_d, target_f):
     """ 
     Applies the file to data_proc_all
@@ -84,8 +97,51 @@ def pipe_iteration(i, name, data_f, out_d, target_f):
         logging.error("Iteration %s error: %s"%(i, e))
     logging.info("File %s: ending", i)
     stop_thread_logging(thread_log_handler)
-
-######################
+    
+def pipe_data_iteration(i, name, data_f, out_d, target_f):
+    """ 
+    Applies the file to data_gen_all
+    Generates corr fits
+    """
+    thread_log_handler = start_thread_logging()
+    try:
+        logging.info("File %s: starting %s"% (i, name))
+        logging.info("   %s name: %s"% (i, name))
+        logging.info("   %s d_file: %s"% (i, data_f))
+        logging.info("   %s o_dirs: %s"% (i, out_d))
+        logging.info("   %s t_file: %s"% (i, target_f))
+        data_gen_all(name, data_f, out_d, target_f)
+        data_gen_all(name, data_f, out_d, target_f, s_sub=True)
+        data_gen_all(name, data_f, out_d, target_f, s_sub=True, tt_sub=True)
+    except Exception as e:
+        logging.error("Iteration %s error: %s"%(i, e))
+    logging.info("File %s: ending", i)
+    stop_thread_logging(thread_log_handler)
+    
+def pipe_plot_iteration(i, name, data_f, out_d, target_f):
+    """ 
+    Applies the file to plot_gen_all
+    Generates corr graphs
+    """
+    thread_log_handler = start_thread_logging()
+    try:
+        logging.info("File %s: starting %s"% (i, name))
+        logging.info("   %s name: %s"% (i, name))
+        logging.info("   %s d_file: %s"% (i, data_f))
+        logging.info("   %s o_dirs: %s"% (i, out_d))
+        logging.info("   %s t_file: %s"% (i, target_f))
+        plot_gen_all(name, data_f, out_d)
+        plot_gen_all(name, data_f, out_d, sub_len=5)
+        plot_gen_all(name, data_f, out_d, s_sub=True)
+        plot_gen_all(name, data_f, out_d, s_sub=True, sub_len=5)
+        plot_gen_all(name, data_f, out_d, s_sub=True, tt_sub=True)
+        plot_gen_all(name, data_f, out_d, s_sub=True, tt_sub=True, sub_len=5)
+    except Exception as e:
+        logging.error("Iteration %s error: %s"%(i, e))
+    logging.info("File %s: ending", i)
+    stop_thread_logging(thread_log_handler)
+    
+########################### HELPER FUNCTS #########################
 
 def set_global_paths(conf_dict):
     #set data_path if available
@@ -102,17 +158,9 @@ def set_global_paths(conf_dict):
         target_path = conf_dict["target_path"]
 
 def start_run(conf_f, run_f):
-    """Sets up the pipeline run from a configuration file and a list of date names
-    --------
-    conf_f : string, file.txt
-        Contains file paths 
-    run_f : string, file.txt
-        Contains dates selected to be run in pipeline
-    Outputs
-    ----------
-    darkname : string
-        The name of the output dark FITS file.
-    """
+    
+    ##### Check input files:
+    #TODO
     
     ##### Pipeline inputs
     names=[]   # names per each file
@@ -137,6 +185,14 @@ def start_run(conf_f, run_f):
         logging.error("No valid function input: using all")
         pipe_fn = pipe_iteration
     
+    #TODO: set the file type
+    #have both d or e options
+    
+    # Set if parallel
+    if conf_d["parallel"] == "True":
+        global parallel
+        parallel = True
+    
     ##### RUN FILE: made into list entries #####
     # look at infile, error if infile 
     entries = read_file(run_f)
@@ -145,40 +201,37 @@ def start_run(conf_f, run_f):
     names, d_files, o_dirs, t_files = read_d(entries, data_path, out_path, target_path)
         
     ##### START PIPE
-    # num_files = len(d_files)
-    # logging.info("Number of files: %s", str(num_files))
-    #logging.info('Name of files: %s', names)
+    num_files = len(d_files)
+    logging.info("Number of files: %s", str(num_files))
+    logging.info('Name of files: %s', names)
     
     #### Applying Pipeline code ###
-    pipe_run(pipe_fn, names, d_files, o_dirs, t_files)
-    
-    # BUG: waiting on making this parallel
-    #if parallel:
+    if parallel:
         # parallel pipeline init
-    #    pipe_run_parallel(pipe_fn, names, d_files, o_dirs, t_files)
-    #else:
+        pipe_run_parallel(pipe_fn, names, d_files, o_dirs, t_files)
+    else:
         # reg pipeline init
-    #    pipe_run(pipe_fn, names, d_files, o_dirs, t_files)
-
+        pipe_run(pipe_fn, names, d_files, o_dirs, t_files)
+    
 
 ###################################################################
 ########################### MAIN FUNCTION #########################
 ###################################################################
-
 
 if __name__ == '__main__':
     """
     arg1: Conf file (txt file with paths, function, parallel option)
     arg2: text file (with it's extension)
     """
+    
     conf_file = sys.argv[1]
     run_file = sys.argv[2]
     
     ## Starts logger
-    #dir_in = run_file.replace(".txt", "_log/")
-    #if not os.path.exists(dir_in):
-    #    os.makedirs(dir_in)
-    #config_root_logger(dir_in)
+    dir_in = run_file.replace(".txt", "_log/")
+    if not os.path.exists(dir_in):
+        os.makedirs(dir_in)
+    config_root_logger(dir_in)
     
     ## Runs Pipeline
     start_run(conf_file, run_file)
@@ -186,30 +239,6 @@ if __name__ == '__main__':
 
     
     
-############################## Class
 
-class Est_pipe(object):
     
-    def __init__(self, files, args*):
-        self.out_fits = files
-        self.est_obj = []
-        self.df_total = pd.DataFrame()
     
-    def run_file(self, file):
-        # some sort of inputing on files
-        er_pipe = er.Estimate_simple(file)
-        self.est_obj.append(er_pipe)
-        return er_pipe.return_table()
-    
-    def run_files(self):
-        df_total = pd.DataFrame()
-        for file in self.out_fits:
-            table = self.run_file(file)
-            df_total = pd.concat([df_total, table])
-        self.df_total = df_total
-        
-    def save_table(self, ):
-        if name == "":
-            name = 
-        self.df_total.to_csv(r'c:\data\pandas.txt', index=None, sep=' ', mode='a')
-        
