@@ -60,6 +60,7 @@ rad_map_inv = np.ones(rad_map_boolean.shape) - rad_map_boolean
 def est_file(cor_f, method="meanshift",  text = True, plot = False):
     # set up corr object
     er_pipe = Estimate_simple(cor_f)
+    print(er_pipe.name)
     # run estimation and return table
     table = er_pipe.return_table(clstr_method = method, sdv_cnd = 2, n_filter = 20)
     # deciciding where to store locations
@@ -67,15 +68,24 @@ def est_file(cor_f, method="meanshift",  text = True, plot = False):
         # saving a text file
         plot_type = "_est_simple"
         # for a new directory with estimations
-        print(er_pipe.save_text(table, plot_type))
+        er_pipe.save_text(table, plot_type)
         #saving table to this directory:
         
     if plot:
-        plot_dir = "txt"
-        plot_type = "estdf"
+        plot_dir = "spds"
+        plot_type = "_spds"
         # generate figure
+        fig = er_pipe.plot_spds_detect()
         # saving a text file
         er_pipe.save_plot(fig, plot_dir, plot_type)
+        
+        # generate figure
+        plot_dir = "clstr"
+        plot_type = "_clstr"
+        fig = plot_clstr_table(table, name=er_pipe.name, min_count=er_pipe.n_filter)
+        # saving a text file
+        er_pipe.save_plot(fig, plot_dir, plot_type)
+        
     return table
 
 
@@ -315,13 +325,40 @@ class Estimate_simple(object):
     
     ### Saving
     
+    def est_file_gen(self, plot_dir, plot_type, file_type):
+        """
+        Generates a file name for a plot, renumbers if name already taken
+            args: plot_type (varies by plot func), file_type ("png" or "gif"), Graphing specifications
+            retuns: out_file (descriptive string)
+        """
+        out_dir = self.data.out_dir + "est/" + plot_dir + "/"
+        out_file = self.data.name 
+        # generating file structure more finely
+        if self.data.s_sub and self.data.tt_sub:
+            out_file = out_file + "_stt"
+        elif self.data.tt_sub:
+            out_file = out_file + "_tt"
+        elif self.data.s_sub:
+            out_file = out_file + "_s"
+        else:
+            out_file = out_file + "_raw"
+        out_file = out_file + plot_type
+        #check if path exists
+        path = self.data.path_check(out_dir, loud=False)
+        # Renumber if repeats 
+        out_base = out_dir + out_file
+        i = 0
+        while os.path.exists(out_base + "_%s.%s" % (i, file_type)):
+            i += 1
+        out = out_base + "_%s.%s" % (i, file_type)
+        return out
+    
     def save_text(self, df, plot_type):
         # saving a text file
         plot_dir = "txt"
         file_type = "txt"
-        plot_dir =  self.data.plot_file_gen(plot_dir, plot_type, file_type)
-        # for a new directory with estimations
-        plot_dir = plot_dir.replace("plots/", "est/")
+        plot_dir =  self.est_file_gen(plot_dir, plot_type, file_type)
+        
         # saving a Pandas df to txt
         df.to_csv(plot_dir, header=True, index=False, sep='\t', mode='a')
         return plot_dir
@@ -329,11 +366,10 @@ class Estimate_simple(object):
     def save_plot(self, fig, plot_dir, plot_type):
         # saving a text file
         file_type = "png"
-        plot_dir =  self.data.plot_file_gen(plot_dir, plot_type, file_type)
-        # for a new directory with estimations
-        plot_dir = plot_dir.replace("plots/", "est/")
+        plot_dir =  self.est_file_gen(plot_dir, plot_type, file_type)
+
         # saving a Pandas df to txt
-        fig.savefig(plot_dir, dpi=300)
+        fig.savefig(plot_dir)
         return plot_dir
     
     ### Plotting
@@ -361,11 +397,12 @@ class Estimate_simple(object):
         plt.xlim([0, 360])
         plt.ylim([0, 30])
         
+        #dir_c_proj(mean_x, mean_y
         if acor:
-            plt.scatter(np.degrees(self.a_spds), self.a_dirs, c="green",  alpha = .3, label="a")
+            plt.scatter(np.degrees(self.a_dirs), self.a_spds, c="green",  alpha = .3, label="a")
         if xcor:
-            plt.scatter(np.degrees(self.x_spds), self.x_dirs, c="red",  alpha = .3, label="x")            
-        plt.title( self.name + 'Detections')
+            plt.scatter(np.degrees(self.x_dirs), self.x_spds, c="red",  alpha = .3, label="x")            
+        plt.title( self.name + ' Detections')
         plt.ylabel('wind speed')
         plt.xlabel('wind dir')
         plt.legend()
@@ -525,8 +562,7 @@ def plot_clstr_table(table, name="Data", min_count=0):
 
     plt.title(name +' Estimates, all')
     plt.ylabel('wind speed')
-    plt.xlabel('wind dir')
-    plt.legend()   
+    plt.xlabel('wind dir')   
     return fig
 
 def det_color(c):
