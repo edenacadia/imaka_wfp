@@ -183,12 +183,14 @@ if __name__ == '__main__':
     ## Runs Pipeline
     start_run(conf_file, run_file)
     
+
+    
     
 ############################## Class
 
 class Est_pipe(object):
     
-    def __init__(self, files, args*):
+    def __init__(self, files, *args):
         self.out_fits = files
         self.est_obj = []
         self.df_total = pd.DataFrame()
@@ -205,3 +207,9 @@ class Est_pipe(object):
             table = self.run_file(file)
             df_total = pd.concat([df_total, table])
         self.df_total = df_total
+        
+    def save_table(self, ):
+        if name == "":
+            name = "0.txt"
+        self.df_total.to_csv(r'c:\data\pandas.txt', index=None, sep=' ', mode='a')
+        

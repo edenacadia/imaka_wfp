@@ -56,9 +56,8 @@ for i in np.arange(0, 8):
 rad_map_inv = np.ones(rad_map_boolean.shape) - rad_map_boolean
 
 
-
 ################# funning estimator for one file
-def est_file(cor_f, method  =detect_cluster_meanshift,  text = True, plot = False, *args):
+def est_file(cor_f, method="meanshift",  text = True, plot = False):
     # set up corr object
     er_pipe = Estimate_simple(cor_f)
     # run estimation and return table
@@ -66,9 +65,11 @@ def est_file(cor_f, method  =detect_cluster_meanshift,  text = True, plot = Fals
     # deciciding where to store locations
     if text:
         # saving a text file
-        plot_type = "est_simple"
+        plot_type = "_est_simple"
         # for a new directory with estimations
         print(er_pipe.save_text(table, plot_type))
+        #saving table to this directory:
+        
     if plot:
         plot_dir = "txt"
         plot_type = "estdf"
@@ -103,6 +104,13 @@ class Estimate_simple(object):
         self.x_xs = None
         self.x_ys = None
         self.x_cstr = None
+        # params
+        self.clstr_method = ""
+        self.detect_clp = None
+        self.sdv_comp = 3
+        self.sdv_cnd = None
+        self.n_filter = None
+        
     
     def acor_map(self):
         data = self.data
@@ -125,11 +133,18 @@ class Estimate_simple(object):
         avg_xcor = np.divide(avg_xcor, count)
         return avg_xcor
     
-    def run(self, xcor=False, detect_clp = 4, clstr_method=detect_cluster_meanshift):
+    def run(self, xcor=False, detect_clp = 4, clstr_method="meanshift"):
         #Cluster methods
-        # detect_cluster_meanshift
-        # detect_cluster_dbscan
-        # detect_cluster_affprop
+        # meanshift
+        # dbscan
+        # affprop
+        
+        #saving parameters
+        self.clstr_method = clstr_method
+        self.detect_clp = detect_clp
+        
+        #translating string to function
+        clstr_fn = dispatcher[clstr_method]
         
         # choosing between auto or crodd correlations 
         if not xcor:
@@ -143,7 +158,8 @@ class Estimate_simple(object):
         # PART 2 : Speed Map
         dtct, spds, dirs, xs, ys = speed_map(detect_lvl, detect_clp, 333)
         # PART 3: Clustering
-        clusters, yhat = clstr_method(self.data, spds, xs, ys)
+        clusters, yhat = clstr_fn(self.data, spds, xs, ys)
+        
         # saving these parts based on a or x cor     
         if not xcor:
             self.a_dtct = dtct
@@ -159,12 +175,15 @@ class Estimate_simple(object):
             self.x_yhat = yhat
         return spds, dirs
     
-    def return_table(self, sdv_cnd = 0, n_filter = 0, clstr_method = detect_cluster_meanshift):
+    def return_table(self, sdv_cnd = 0, n_filter = 0, clstr_method = "meanshift"):
         # Checking to see if system has been run before
         if self.a_dtct is None:
             self.run(clstr_method=clstr_method)
         if self.x_dtct is None:
             self.run(xcor = True, clstr_method=clstr_method)
+        #saving parameters
+        self.sdv_cnd = sdv_cnd
+        self.n_filter = n_filter
         # Returning summary of cluster
         asum = self.summary_cluster(sdv_cnd = sdv_cnd, n_filter = n_filter)
         xsum = self.summary_cluster(xcor = True, sdv_cnd = sdv_cnd, n_filter = n_filter)
@@ -180,6 +199,12 @@ class Estimate_simple(object):
         dfx['xcor'] = 1 
         df = pd.concat([dfa, dfx], ignore_index=True)
         df['name'] = self.name
+        # saving parameters:
+        df['clstr_method'] = self.clstr_method
+        df['detect_clp'] = self.detect_clp
+        df['sdv_comp'] = self.sdv_comp
+        df['sdv_cnd'] = self.sdv_cnd
+        df['n_filter'] = self.n_filter
         return df
     
     def summary_cluster(self, xcor=False, sdv_cnd = 0, n_filter = 0):
@@ -190,13 +215,17 @@ class Estimate_simple(object):
             self.run()
         if xcor and self.x_dtct is None:
             self.run(xcor = True)
+        # pulling method vars
         dtct = self.x_dtct if xcor else self.a_dtct
         spds = self.x_spds if xcor else self.a_spds
         dirs = self.x_dirs if xcor else self.a_dirs
         xs = self.x_xs if xcor else self.a_xs
         ys = self.x_ys if xcor else self.a_ys
         clusters = self.x_cstr if xcor else self.a_cstr
-        yhat = self.x_yhat if xcor else self.a_yhat        
+        yhat = self.x_yhat if xcor else self.a_yhat 
+        #saving parameters
+        self.sdv_cnd = sdv_cnd
+        self.n_filter = n_filter
         # for each cluster return summary of cluster
         summary = []
         for cluster in clusters:
@@ -289,22 +318,22 @@ class Estimate_simple(object):
     def save_text(self, df, plot_type):
         # saving a text file
         plot_dir = "txt"
-        file_type = ".txt"
-        plot_dir =  er_pipe.data.plot_file_gen(self, plot_dir, plot_type, file_type)
+        file_type = "txt"
+        plot_dir =  self.data.plot_file_gen(plot_dir, plot_type, file_type)
         # for a new directory with estimations
-        plot_dir.replace("plots/", "est/")
+        plot_dir = plot_dir.replace("plots/", "est/")
         # saving a Pandas df to txt
-        #df.to_csv(plot_dir, header=True, index=False, sep='\t', mode='a')
+        df.to_csv(plot_dir, header=True, index=False, sep='\t', mode='a')
         return plot_dir
     
     def save_plot(self, fig, plot_dir, plot_type):
         # saving a text file
-        file_type = ".png"
-        plot_dir =  er_pipe.data.plot_file_gen(self, plot_dir, plot_type, file_type)
+        file_type = "png"
+        plot_dir =  self.data.plot_file_gen(plot_dir, plot_type, file_type)
         # for a new directory with estimations
-        plot_dir.replace("plots/", "est/")
+        plot_dir = plot_dir.replace("plots/", "est/")
         # saving a Pandas df to txt
-        #fig.savefig(plot_dir, dpi=300)
+        fig.savefig(plot_dir, dpi=300)
         return plot_dir
     
     ### Plotting

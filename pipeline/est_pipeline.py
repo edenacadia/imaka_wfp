@@ -190,7 +190,7 @@ if __name__ == '__main__':
 
 class Est_pipe(object):
     
-    def __init__(self, files, args*):
+    def __init__(self, files, *args):
         self.out_fits = files
         self.est_obj = []
         self.df_total = pd.DataFrame()
@@ -210,6 +210,6 @@ class Est_pipe(object):
         
     def save_table(self, ):
         if name == "":
-            name = 
+            name = "0.txt"
         self.df_total.to_csv(r'c:\data\pandas.txt', index=None, sep=' ', mode='a')
         
