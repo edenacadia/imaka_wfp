@@ -58,6 +58,13 @@ rad_map_inv = np.ones(rad_map_boolean.shape) - rad_map_boolean
 
 ################# funning estimator for one file
 def est_file(cor_f, method="meanshift",  text = True, plot = False):
+    """
+    Takes in arguments and access the Estimator. Passes kwargs to the function.  
+    
+    """
+    ## TODO: set up kwargs
+    ## TODO: set up multiplot access
+    
     # set up corr object
     er_pipe = Estimate_simple(cor_f)
     print(er_pipe.name)
@@ -85,6 +92,7 @@ def est_file(cor_f, method="meanshift",  text = True, plot = False):
         fig = plot_clstr_table(table, name=er_pipe.name, min_count=er_pipe.n_filter)
         # saving a text file
         er_pipe.save_plot(fig, plot_dir, plot_type)
+        plt.close()
         
     return table
 
@@ -94,12 +102,14 @@ def est_file(cor_f, method="meanshift",  text = True, plot = False):
 
 class Estimate_simple(object):
     
-    def __init__(self, file):
+    def __init__(self, file, **kwargs):
         self.out_fits = file
         self.data = Correlator("", "", "", f_file = file)
         self.name = self.data.name
         self.date = self.data.date
+        self.hz = 333 # TODO: find sampling rate
         # these will change each run
+        self.table = pd.DataFrame()
         # auto correlation 
         self.a_dtct = None
         self.a_spds = None
@@ -115,12 +125,29 @@ class Estimate_simple(object):
         self.x_ys = None
         self.x_cstr = None
         # params
-        self.clstr_method = ""
-        self.detect_clp = None
+        self.clstr_method = "meanshift"
+        self.detect_clp = 4
         self.sdv_comp = 3
-        self.sdv_cnd = None
-        self.n_filter = None
-        
+        self.sdv_cnd = 0    # by default no condensing
+        self.n_filter = 0   # by default no number filtering
+        self.update_params(**kwargs)
+    
+    def update_params(self, **kwargs):
+        """
+        Updates the tuneable parameters based on args given
+        """
+        if "clstr_method" in kwargs: 
+            self.clstr_method = kwargs.get("clstr_method")
+        if "detect_clp" in kwargs: 
+            self.detect_clp = kwargs.get("detect_clp")
+        if "sdv_comp" in kwargs: 
+            self.sdv_comp = kwargs.get("sdv_comp")
+        if "sdv_cnd" in kwargs: 
+            self.sdv_cnd = kwargs.get("sdv_cnd")
+        if "n_filter" in kwargs: 
+            self.n_filter = kwargs.get("n_filter")
+        if "hz" in kwargs: 
+            self.hz = kwargs.get("hz")
     
     def acor_map(self):
         data = self.data
@@ -143,33 +170,47 @@ class Estimate_simple(object):
         avg_xcor = np.divide(avg_xcor, count)
         return avg_xcor
     
-    def run(self, xcor=False, detect_clp = 4, clstr_method="meanshift"):
-        #Cluster methods
-        # meanshift
-        # dbscan
-        # affprop
+    def run(self, xcor=False, **kwargs):
+        """
+        Does the 3 part run for radial estimation
         
-        #saving parameters
-        self.clstr_method = clstr_method
-        self.detect_clp = detect_clp
+        Optional Inputs
+        --------
+        xcor: Boolean
+        if true runs xcor, if false runs acor (step1)
         
-        #translating string to function
-        clstr_fn = dispatcher[clstr_method]
+        detect_clp: sdv
+        cut on detectins to determine significance (step2)
         
-        # choosing between auto or crodd correlations 
+        clstr_method: string
+        type of clustering method, options: meanshift, dbscan, affprop (step3)
+        
+        Outputs
+        ----------
+        spds: list
+        list of detected speeds in m/s
+        
+        dirs: list
+        list of detected directions in radians
+        """
+        self.update_params(**kwargs)  ## update_params
+        #  saving parameters
+        detect_clp = self.detect_clp # default 4
+        clstr_method = self.clstr_method # default meanshift
+        clstr_fn = dispatcher[clstr_method] # translating string to function
+        #  choosing between auto or crodd correlations 
         if not xcor:
             avg_awfs = self.acor_map()
         if xcor:    
             avg_awfs = self.xcor_map()
-        #subtracting averages pixel value from frame
-        avg_awfs_sub = np.subtract(avg_awfs, np.average(avg_awfs, axis = 0))
-        # PART 1 : determining detection levels
-        detect_lvl = detect_map(avg_awfs_sub)
-        # PART 2 : Speed Map
-        dtct, spds, dirs, xs, ys = speed_map(detect_lvl, detect_clp, 333)
-        # PART 3: Clustering
-        clusters, yhat = clstr_fn(self.data, spds, xs, ys)
+        avg_awfs_sub = np.subtract(avg_awfs, np.average(avg_awfs, axis = 0)) #  subtracting averages pixel value from frame
         
+        ### PART 1 : determining detection levels
+        detect_lvl = detect_map(avg_awfs_sub)
+        ### PART 2 : Speed Map
+        dtct, spds, dirs, xs, ys = speed_map(detect_lvl, detect_clp, self.hz)
+        ### PART 3: Clustering
+        clusters, yhat = clstr_fn(self.data, spds, xs, ys)
         # saving these parts based on a or x cor     
         if not xcor:
             self.a_dtct = dtct
@@ -185,18 +226,33 @@ class Estimate_simple(object):
             self.x_yhat = yhat
         return spds, dirs
     
-    def return_table(self, sdv_cnd = 0, n_filter = 0, clstr_method = "meanshift"):
+    def return_table(self, **kwargs):
+        """
+        Returns a df summary of clusters detected with parameters. 
+        If no outputs, will call run function on acor and xcor
+        
+        Optional Inputs
+        --------
+        sdv_cnd: int
+        if 0, no condensing. Otherwise, stdv for condensing peaks
+        
+        n_filter: int
+        min number of counts for a cluster to be considered
+        
+        Outputs
+        ----------
+        df: DataFrame
+        a pandas table summarizing clusters
+        """
+        self.update_params(**kwargs)  ## update_params
         # Checking to see if system has been run before
         if self.a_dtct is None:
-            self.run(clstr_method=clstr_method)
+            self.run()
         if self.x_dtct is None:
-            self.run(xcor = True, clstr_method=clstr_method)
-        #saving parameters
-        self.sdv_cnd = sdv_cnd
-        self.n_filter = n_filter
+            self.run(xcor = True)
         # Returning summary of cluster
-        asum = self.summary_cluster(sdv_cnd = sdv_cnd, n_filter = n_filter)
-        xsum = self.summary_cluster(xcor = True, sdv_cnd = sdv_cnd, n_filter = n_filter)
+        asum = self.summary_cluster()
+        xsum = self.summary_cluster(xcor = True)
         # Classifying peaks
         aclass, xclass = self.classify_peaks(asum, xsum)
         # df for acor
@@ -215,9 +271,31 @@ class Estimate_simple(object):
         df['sdv_comp'] = self.sdv_comp
         df['sdv_cnd'] = self.sdv_cnd
         df['n_filter'] = self.n_filter
+        # save table
+        self.table = df
         return df
     
-    def summary_cluster(self, xcor=False, sdv_cnd = 0, n_filter = 0):
+    def summary_cluster(self, xcor=False, **kwargs):
+        """
+        Returns a list summary of clusters detected. 
+        If no outputs, will call run function on acor and xcor
+        
+        Optional Inputs
+        --------
+        sdv_cnd: int
+        if 0, no condensing. Otherwise, stdv for condensing peaks
+        
+        n_filter: int
+        min number of counts for a cluster to be considered
+        
+        Outputs
+        ----------
+        summary: list
+        a lists of list containing values of ['dir', 'dir_std', 'spd', 'spd_std', 'count']
+        """
+        self.update_params(**kwargs)  ## update_params
+        sdv_cnd = self.sdv_cnd
+        n_filter = self.n_filter
         # based off of cluster output
         # include counts per cluster     
         #choosing saved variables base on xcor/acor
@@ -233,14 +311,9 @@ class Estimate_simple(object):
         ys = self.x_ys if xcor else self.a_ys
         clusters = self.x_cstr if xcor else self.a_cstr
         yhat = self.x_yhat if xcor else self.a_yhat 
-        #saving parameters
-        self.sdv_cnd = sdv_cnd
-        self.n_filter = n_filter
-        # for each cluster return summary of cluster
-        summary = []
+        summary = [] # for each cluster return summary of cluster
         for cluster in clusters:
-            # get row indexes for samples with this cluster
-            row_ix = where(yhat == cluster)
+            row_ix = where(yhat == cluster) # get row indexes for cluster samples
             ## Standardized return 5 element structure
             mean_x = np.mean(xs[row_ix])
             mean_y = np.mean(ys[row_ix])
@@ -251,10 +324,8 @@ class Estimate_simple(object):
                             np.mean(spds[row_ix]),
                             np.std(spds[row_ix]),
                             row_ix[0].shape[0]])
-        # condensing peaks
-        summary = self.condense_peaks(summary, sdv_cnd)
-        # filtering peaks
-        summary = self.filter_peaks(summary, n_filter)
+        summary = self.condense_peaks(summary, sdv_cnd) # condensing peaks
+        summary = self.filter_peaks(summary, n_filter) # filtering peaks
         return summary
     
     def classify_peaks(self, acor_sum, xcor_sum):
@@ -353,63 +424,212 @@ class Estimate_simple(object):
         out = out_base + "_%s.%s" % (i, file_type)
         return out
     
-    def save_text(self, df, plot_type):
+    def save_text(self, df, txt_type):
+        """Takes in the type of txt and sends to the proper save location
+
+        Inputs
+        --------
+        df: DataFrame
+        the pandas dataframe to save
+        
+        txt_type: string
+        the type of data being saved, put into file name
+        
+        Outputs
+        ----------
+        plot dir: string
+        location plot saved to
+        """
         # saving a text file
         plot_dir = "txt"
         file_type = "txt"
-        plot_dir =  self.est_file_gen(plot_dir, plot_type, file_type)
+        plot_dir =  self.est_file_gen(plot_dir, txt_type, file_type)
         
         # saving a Pandas df to txt
         df.to_csv(plot_dir, header=True, index=False, sep='\t', mode='a')
         return plot_dir
     
-    def save_plot(self, fig, plot_dir, plot_type):
-        # saving a text file
-        file_type = "png"
-        plot_dir =  self.est_file_gen(plot_dir, plot_type, file_type)
+    def save_plot(self, plot, **kwargs):
+        """Takes in the type of plot and sends to the proper save location
 
-        # saving a Pandas df to txt
-        fig.savefig(plot_dir)
+        Inputs
+        --------
+        plot: string
+        the type of plot desired
+        
+        Optional Inputs
+        -------------------
+        kwargs: dictionary
+        arguments for plotting function
+
+        Outputs
+        ----------
+        plot dir: string
+        location plot saved to
+        """
+        #determining placement from 
+        plot_dir =  self.est_file_gen(plot, "_"+plot, "png")
+        if plot == "spds":
+            ## speed plot
+            self.plot_spds_detect(plot_dir=plot_dir, **kwargs)
+        elif plot == "clstr":
+            ## cluster plot
+            self.plot_clstr(**kwargs)
+        elif plot == "cor_prob":
+            ## prob cor plot
+            pass
+        elif plot == "lyr_prob":
+            pass
+            
         return plot_dir
     
     ### Plotting
-    
-    def plot_speeds(self, dirs, spds):
-        plt.scatter(np.degrees(dirs), spds, alpha=0.5)
-        plt.title(self.name)
-        plt.xlim([-180, 180])
-        plt.ylim([0, 30])
-        plt.xlabel('Dirs (degrees)')
-        plt.ylabel('speed (m/s?)')
-        plt.show()
         
-    def plot_windrose(self, dirs, spds):
-        ax = WindroseAxes.from_ax()
-        ax.contourf((np.degrees(dirs) + 360)%360, spds, bins=np.arange(0.1, 35, 5), cmap=cm.viridis)
-        ax.set_legend()
-        ax.set_title(self.name + " Detections speed  and direction")
-        plt.show()
-        
-    def plot_spds_detect(self, acor=True, xcor=True):
-        # pipeline iterating
+    def plot_spds_detect(self, **kwargs):
+        """Plots the speeds and directions above the detection limit
 
+        Optional Inputs
+        -------------------
+        xcor : boolean
+        plotting xcor values
+       
+        acor : boolean
+        plotting acor values
+        """
+        # pipeline iterating          
+        acor = kwargs.get("acor") if 'acor' in kwargs else True
+        xcor = kwargs.get("xcor") if 'xcor' in kwargs else True
+        # starting plot
         fig = plt.figure(figsize=(10,5))
         plt.xlim([0, 360])
-        plt.ylim([0, 30])
-        
-        #dir_c_proj(mean_x, mean_y
-        if acor:
+        plt.ylim([0, 50])       
+        if acor and self.a_dirs is not None:
             plt.scatter(np.degrees(self.a_dirs), self.a_spds, c="green",  alpha = .3, label="a")
-        if xcor:
+        if xcor and self.x_dirs is not None:
             plt.scatter(np.degrees(self.x_dirs), self.x_spds, c="red",  alpha = .3, label="x")            
-        plt.title( self.name + ' Detections')
-        plt.ylabel('wind speed')
-        plt.xlabel('wind dir')
+        param_title = "Detection Clip: "+ str(self.detect_clp)
+        plt.title(self.name + ' Detections \n ' + param_title)
+        plt.ylabel('wind speed (m/s)')
+        plt.xlabel('wind dir (degrees)')
         plt.legend()
+        # starting saves / returns
+        if 'plot_dir' in kwargs:
+            fig.savefig(kwargs.get('plot_dir'))
+            plt.close()
+            return True
+        else:    
+            return fig
         
+    def plot_clstr(self, **kwargs):
+        """Plots the cluster centers and 3*std dev on error
+
+        Optional Inputs
+        -------------------
+        table : df
+        plot your own cluster table
+        """
+        table = kwargs.get("table") if 'table' in kwargs else self.table
+        if table.empty:
+            return False
+        
+        fig = plt.figure(figsize=(10,5))
+        plt.xlim([0, 360])
+        plt.ylim([0, 50])
+        ax = plt.gca()
+
+        for index, row in table.iterrows():
+            clr  = det_color(row["class"])
+            #alph = det_alph(row["count"])
+            alph= 0.5
+            plt.scatter(row['dir'], row['spd'], c=clr,  alpha = 1)
+            spread = matplotlib.patches.Ellipse((row['dir'], row['spd']), 3*row['dir_std'], 3*row['spd_std'], angle=0, color=clr, alpha=alph)
+            ax.add_patch(spread)
+
+        param_title = "Method: " + self.clstr_method + ", N filter: " + str(self.n_filter) + ", sdv comp: " + str(self.sdv_cnd) 
+        plt.title(self.name + ' Estimation Clusters \n ' + param_title)
+        plt.ylabel('wind speed')
+        plt.xlabel('wind dir')   
+        
+        if 'plot_dir' in kwargs:
+            fig.savefig(kwargs.get('plot_dir'))
+            plt.close()
+            return True  
         return fig
+    
+    # Plotting histogram:
+    def plot_prob_hist(self, rmin = -25, rmax = 25, rinc = 2, rlab = 5):
+        # inputs: minimum velocity, maximum velocity, bin size, label increment
+        
+        #TODO: assumes you've run both acor and xcor already
 
+        # generating normalization
+        #TODO: assumes size of cor map
+        full = speed_map(np.ones([201, 15, 15]), 0.5, self.hz)
+        v_x, v_y = proj_xy(full[2], full[1])
 
+        # we get speeds and directions out of  run
+        av_x, av_y = proj_xy(self.a_dirs, self.a_spds)
+        xv_x, xv_y = proj_xy(self.x_dirs, self.x_spds)
+
+        param_title = "Detection Clip: "+ str(self.detect_clp) 
+        title = 'acor wind map, %  \n' +self.name +', ' + param_title
+        #plt.xlabel('$v_x$ (m/s)')
+        #plt.ylabel('$v_y$ (m/s)') 
+
+        fig, (ax, ax2, ax3, cax) = plt.subplots(ncols=4,figsize=(9,3), 
+                      gridspec_kw={"width_ratios":[1,1,1, 0.05]})
+        fig.subplots_adjust(wspace=0.3)
+        fig.suptitle(str(title))
+
+        nH, xedges, yedges = np.histogram2d(v_x, v_y, bins=[np.arange(rmin, rmax, rinc), np.arange(rmin, rmax, rinc)])
+        aH, xedges, yedges = np.histogram2d(av_x, av_y, bins=[np.arange(rmin, rmax, rinc), np.arange(rmin, rmax, rinc)])
+        xH, xedges, yedges = np.histogram2d(xv_x, xv_y, bins=[np.arange(rmin, rmax, rinc), np.arange(rmin, rmax, rinc)])
+
+        am = ax.imshow(aH / nH, interpolation='nearest', origin='low',
+                    extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], cmap=plt.cm.Reds, vmin=0, vmax=1)
+        xm = ax2.imshow(xH / nH, interpolation='nearest', origin='low',
+                    extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], cmap=plt.cm.Reds, vmin=0, vmax=1)
+        m = ax3.imshow(aH/nH - xH/nH, interpolation='nearest', origin='low',
+                    extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], cmap=plt.cm.Reds, vmin=0, vmax=1)
+
+        ax.set_xlabel("acor")
+        ax2.set_xlabel("xcor")
+        ax3.set_xlabel("sub")
+
+        fig.colorbar(m, cax=cax)
+        return fig
+        
+############################    
+### Generic Plotting
+############################
+
+def plot_clstr_table(table, name="Data", min_count=0):
+    fig = plt.figure(figsize=(10,5))
+    plt.xlim([0, 360])
+    plt.ylim([0, 50])
+    ax = plt.gca()
+
+    for index, row in table[table['count']>min_count].iterrows():
+        clr  = det_color(row["class"])
+        #alph = det_alph(row["count"])
+        alph= 0.3
+        plt.scatter(row['dir'], row['spd'], c=clr,  alpha = 1)
+        spread = matplotlib.patches.Ellipse((row['dir'], row['spd']), 3*row['dir_std'], 3*row['spd_std'], angle=0, color=clr, alpha=alph)
+        ax.add_patch(spread)
+
+    param_title = "Method: " + row['clstr_method'] + ", N filter: " + str(row['n_filter']) + ", sdv cnd: " + str(row['sdv_cnd'])
+    plt.title(name +' Estimation Clusters, all \n ' + param_title)
+    plt.ylabel('wind speed (m/s)')
+    plt.xlabel('wind dir (degrees)')   
+    return fig
+
+def det_color(c):
+    if c == "NA":
+        return 'black'
+    elif c == "GL":
+        return 'blue'
+    elif c == "FL":
+        return 'orange'
         
         
 # static functions
@@ -473,6 +693,9 @@ def proj_x(dir_rad, c):
 def proj_y(dir_rad, c):
     return c*np.cos(dir_rad)
 
+def proj_xy(dir_rad, c):
+    return c*np.sin(dir_rad), c*np.cos(dir_rad)
+
 def dir_std(dirs):
     dirs_shift = (dirs + np.pi) % (2*np.pi)
     return np.min([np.std(dirs), np.std(dirs_shift)]) 
@@ -531,7 +754,7 @@ def speed_map(detection_map, detect_val, hz):
         i+=1
         #if i>100: break
         
-    return [detect_list,speed_list, dir_list, x_proj, y_proj]
+    return [detect_list, speed_list, dir_list, x_proj, y_proj]
 
 ##############
 ### Part 4 ###
@@ -540,35 +763,3 @@ def speed_map(detection_map, detect_val, hz):
 # see cluster.py
     
 
-    
-    
-    
-    
-### Plotting
-
-def plot_clstr_table(table, name="Data", min_count=0):
-    fig = plt.figure(figsize=(10,5))
-    plt.xlim([0, 360])
-    plt.ylim([0, 50])
-    ax = plt.gca()
-
-    for index, row in table[table['count']>min_count].iterrows():
-        clr  = det_color(row["class"])
-        #alph = det_alph(row["count"])
-        alph= 0.5
-        plt.scatter(row['dir'], row['spd'], c=clr,  alpha = 1)
-        spread = matplotlib.patches.Ellipse((row['dir'], row['spd']), 3*row['dir_std'], 3*row['spd_std'], angle=0, color=clr, alpha=alph)
-        ax.add_patch(spread)
-
-    plt.title(name +' Estimates, all')
-    plt.ylabel('wind speed')
-    plt.xlabel('wind dir')   
-    return fig
-
-def det_color(c):
-    if c == "NA":
-        return 'black'
-    elif c == "GL":
-        return 'blue'
-    elif c == "FL":
-        return 'orange'

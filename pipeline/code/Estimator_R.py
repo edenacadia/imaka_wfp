@@ -555,6 +555,49 @@ class Estimate_simple(object):
             plt.close()
             return True  
         return fig
+    
+    # Plotting histogram:
+    def plot_prob_hist(self, rmin = -25, rmax = 25, rinc = 2, rlab = 5):
+        # inputs: minimum velocity, maximum velocity, bin size, label increment
+        
+        #TODO: assumes you've run both acor and xcor already
+
+        # generating normalization
+        #TODO: assumes size of cor map
+        full = speed_map(np.ones([201, 15, 15]), 0.5, self.hz)
+        v_x, v_y = proj_xy(full[2], full[1])
+
+        # we get speeds and directions out of  run
+        av_x, av_y = proj_xy(self.a_dirs, self.a_spds)
+        xv_x, xv_y = proj_xy(self.x_dirs, self.x_spds)
+
+        param_title = "Detection Clip: "+ str(self.detect_clp) 
+        title = 'acor wind map, %  \n' +self.name +', ' + param_title
+        #plt.xlabel('$v_x$ (m/s)')
+        #plt.ylabel('$v_y$ (m/s)') 
+
+        fig, (ax, ax2, ax3, cax) = plt.subplots(ncols=4,figsize=(9,3), 
+                      gridspec_kw={"width_ratios":[1,1,1, 0.05]})
+        fig.subplots_adjust(wspace=0.3)
+        fig.suptitle(str(title))
+
+        nH, xedges, yedges = np.histogram2d(v_x, v_y, bins=[np.arange(rmin, rmax, rinc), np.arange(rmin, rmax, rinc)])
+        aH, xedges, yedges = np.histogram2d(av_x, av_y, bins=[np.arange(rmin, rmax, rinc), np.arange(rmin, rmax, rinc)])
+        xH, xedges, yedges = np.histogram2d(xv_x, xv_y, bins=[np.arange(rmin, rmax, rinc), np.arange(rmin, rmax, rinc)])
+
+        am = ax.imshow(aH / nH, interpolation='nearest', origin='low',
+                    extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], cmap=plt.cm.Reds, vmin=0, vmax=1)
+        xm = ax2.imshow(xH / nH, interpolation='nearest', origin='low',
+                    extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], cmap=plt.cm.Reds, vmin=0, vmax=1)
+        m = ax3.imshow(aH/nH - xH/nH, interpolation='nearest', origin='low',
+                    extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], cmap=plt.cm.Reds, vmin=0, vmax=1)
+
+        ax.set_xlabel("acor")
+        ax2.set_xlabel("xcor")
+        ax3.set_xlabel("sub")
+
+        fig.colorbar(m, cax=cax)
+        return fig
         
 ############################    
 ### Generic Plotting
@@ -649,6 +692,9 @@ def proj_x(dir_rad, c):
 
 def proj_y(dir_rad, c):
     return c*np.cos(dir_rad)
+
+def proj_xy(dir_rad, c):
+    return c*np.sin(dir_rad), c*np.cos(dir_rad)
 
 def dir_std(dirs):
     dirs_shift = (dirs + np.pi) % (2*np.pi)

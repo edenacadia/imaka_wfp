@@ -14,7 +14,7 @@ import pandas as pd
 # Personal code
 from pipeline.code.file_reader import *
 import pipeline.code.Estimator as est
-import pipeline.code.Estimator_R as estr
+import pipeline.code.Estimator_R as er
 
 # Filepath defaults
 # updated with fn set_global_paths
@@ -34,6 +34,11 @@ def df_iterator_mult(df, sl_list, sig_list, thresh_list, c_list):
 
 
 ########################## Estimator Radial
+
+def df_iterator_estr(df, **kwargs):
+    # TODO: set up **kwargs
+    er.est_file(cor_f, method="meanshift",  text = True, plot = False)
+    return True
 
 ########################### PIPELINE #########################
     
