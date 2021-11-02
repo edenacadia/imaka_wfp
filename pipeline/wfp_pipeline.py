@@ -65,7 +65,7 @@ def pipe_run_parallel(pipe_funct, names, d_files, o_dirs, t_files):
     threaded_start = time.time()
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        executor.map(pipe_iteration, range(num_files), names, d_files, o_dirs, t_files)
+        executor.map(pipe_iteration_par, range(num_files), names, d_files, o_dirs, t_files)
     
     logging.info("END THREADS")
     time_diff = time.time() - threaded_start
@@ -74,6 +74,13 @@ def pipe_run_parallel(pipe_funct, names, d_files, o_dirs, t_files):
 
 ########################### PIPE ITERS #########################
 
+def log_iter(i, name, data_f, out_d, target_f):
+    """Standard logging format"""
+    logging.info("File %s: starting %s"% (i, name))
+    logging.info("   %s name: %s"% (i, name))
+    logging.info("   %s d_file: %s"% (i, data_f))
+    logging.info("   %s o_dirs: %s"% (i, out_d))
+    logging.info("   %s t_file: %s"% (i, target_f))
 
 def pipe_iteration(i, name, data_f, out_d, target_f):
     """ 
@@ -82,17 +89,23 @@ def pipe_iteration(i, name, data_f, out_d, target_f):
     """
     thread_log_handler = start_thread_logging()
     try:
-        logging.info("File %s: starting %s"% (i, name))
-        logging.info("   %s name: %s"% (i, name))
-        logging.info("   %s d_file: %s"% (i, data_f))
-        logging.info("   %s o_dirs: %s"% (i, out_d))
-        logging.info("   %s t_file: %s"% (i, target_f))
-        data_proc_all(name, data_f, out_d)
-        data_proc_all(name, data_f, out_d, sub_len=5)
-        data_proc_all(name, data_f, out_d, s_sub=True)
-        data_proc_all(name, data_f, out_d, s_sub=True, sub_len=5)
-        data_proc_all(name, data_f, out_d, s_sub=True, tt_sub=True)
+        log_iter(i, name, data_f, out_d, target_f)
         data_proc_all(name, data_f, out_d, s_sub=True, tt_sub=True, sub_len=5)
+    except Exception as e:
+        logging.error("Iteration %s error: %s"%(i, e))
+    logging.info("File %s: ending", i)
+    stop_thread_logging(thread_log_handler)
+
+def pipe_iteration_par(i, name, data_f, out_d, target_f):
+    """ 
+    Applies the file to data_proc_all_par
+    Generates corr fits and corr graphs
+    """
+    thread_log_handler = start_thread_logging()
+    try:
+        log_iter(i, name, data_f, out_d, target_f)
+        ## cor pipeline function
+        data_proc_all_par(name, data_f, out_d, s_sub=True, tt_sub=True)
     except Exception as e:
         logging.error("Iteration %s error: %s"%(i, e))
     logging.info("File %s: ending", i)
@@ -105,13 +118,8 @@ def pipe_data_iteration(i, name, data_f, out_d, target_f):
     """
     thread_log_handler = start_thread_logging()
     try:
-        logging.info("File %s: starting %s"% (i, name))
-        logging.info("   %s name: %s"% (i, name))
-        logging.info("   %s d_file: %s"% (i, data_f))
-        logging.info("   %s o_dirs: %s"% (i, out_d))
-        logging.info("   %s t_file: %s"% (i, target_f))
-        data_gen_all(name, data_f, out_d, target_f)
-        data_gen_all(name, data_f, out_d, target_f, s_sub=True)
+        log_iter(i, name, data_f, out_d, target_f)
+        ## Just data, no plots
         data_gen_all(name, data_f, out_d, target_f, s_sub=True, tt_sub=True)
     except Exception as e:
         logging.error("Iteration %s error: %s"%(i, e))
@@ -125,17 +133,10 @@ def pipe_plot_iteration(i, name, data_f, out_d, target_f):
     """
     thread_log_handler = start_thread_logging()
     try:
-        logging.info("File %s: starting %s"% (i, name))
-        logging.info("   %s name: %s"% (i, name))
-        logging.info("   %s d_file: %s"% (i, data_f))
-        logging.info("   %s o_dirs: %s"% (i, out_d))
-        logging.info("   %s t_file: %s"% (i, target_f))
-        plot_gen_all(name, data_f, out_d)
-        plot_gen_all(name, data_f, out_d, sub_len=5)
-        plot_gen_all(name, data_f, out_d, s_sub=True)
-        plot_gen_all(name, data_f, out_d, s_sub=True, sub_len=5)
+        log_iter(i, name, data_f, out_d, target_f)
+        # plotting all
+        # TODO: check if this is pulling the fits file right?
         plot_gen_all(name, data_f, out_d, s_sub=True, tt_sub=True)
-        plot_gen_all(name, data_f, out_d, s_sub=True, tt_sub=True, sub_len=5)
     except Exception as e:
         logging.error("Iteration %s error: %s"%(i, e))
     logging.info("File %s: ending", i)
@@ -145,6 +146,7 @@ def pipe_plot_iteration(i, name, data_f, out_d, target_f):
 
 def set_global_paths(conf_dict):
     #set data_path if available
+    print(conf_dict)
     if conf_dict["data_path"]:
         global data_path
         data_path = conf_dict["data_path"]
@@ -177,8 +179,11 @@ def start_run(conf_f, run_f):
     set_global_paths(conf_d)
     
     # Chose pipe_fn
-    dispatcher = {'all':pipe_iteration, 'data':pipe_data_iteration, 'plots':pipe_plot_iteration}
-    pipe_fn = pipe_iteration
+    dispatcher = {'all':pipe_iteration, 
+                  'par':pipe_iteration_par, 
+                  'data':pipe_data_iteration, 
+                  'plots':pipe_plot_iteration}
+    pipe_fn = pipe_iteration_par
     try:
         pipe_fn = dispatcher[conf_d["pipe_fn"]]
     except KeyError:
