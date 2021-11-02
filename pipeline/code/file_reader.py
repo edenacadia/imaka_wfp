@@ -87,9 +87,12 @@ def read_d(entries, data_path, out_path, target_path):
                 files = os.listdir(p)
                 ## find and add all data files
                 data =  [p + fn for fn in files if fnmatch.fnmatch(fn, 'ao*o.fits')]
+                ## for tt
+                ##data = [p + fn for fn in files if fnmatch.fnmatch(fn, 'ao*tt*.fits')]
                 #print('data: ', data)
                 if not data:
-                    data =  [p + fn for fn in files if fnmatch.fnmatch(fn, 'ao*.fits')]
+                    data = []
+                    #data =  [p + fn for fn in files if fnmatch.fnmatch(fn, 'ao*.fits')]
                 d_files.extend(data)
                 # create names:
                 filenames = [os.path.basename(f) for f in data]

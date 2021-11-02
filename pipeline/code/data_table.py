@@ -1,3 +1,4 @@
+# data_table
 # Eden McEwen
 # July 16, 2020
 # made to store functions used in generate data table
@@ -34,6 +35,7 @@ def str_to_datetime(string):
     l_int = [int(i) for i in l_str]
     return datetime(l_int[0], l_int[1], l_int[2], l_int[3], l_int[4], l_int[5])
 
+
 ######################################################
 # Pulls from a list of fits and returns a datatable
 ######################################################
@@ -66,10 +68,6 @@ def df_gen_main(run_files, run_input, out_d):
         df_main=df_main.append(df_run, ignore_index = True)
     # returns dataframe
     return df_main
-
-
-
-
 
 
 #pulls from one fits file
@@ -138,17 +136,12 @@ def data_out_fits(out_fits):
             
     return dfObj
 
+######################################################
+## Generate csv file for sorting spreadsheet
+######################################################
 
-
-
-
-
-
-
-
-
-
-
+#def df_to_csv(main_df)
+    
 
 
 ##############################################
@@ -217,6 +210,33 @@ def data_wind_cfht(datetimes, wind_CFHT_p):
         df_cft = df_cft.append(dt_dic, ignore_index=True)
     return df_cft
 
+def data_mass_dimm(datetimes, wind_CFHT_p):
+    df_md = pd.DataFrame(columns=["md_datetime", "md_date", "md_time","DIMM","N_dimm","MASS","N_mass","ground_layer"])
+    
+    df = pd.read_csv("/home/emcewen/data/binned_massdimm.csv", index_col ='ISOFormat')
+    df.index = pd.to_datetime(df.index)
+    df = df.groupby(level=0).first()
+    
+    avg_dt = 10
+
+    for dt in datetimes:
+        #dt = dt.normalize(dt.localize(dt)).astimezone(pytz.utc)
+        #getting the specific row
+        spot = df.index.get_loc(dt, method='nearest')
+        #getting the rown index
+        idx = df.index[df.index.get_loc(dt, method='nearest')]
+        
+        dt_dic = {'md_datetime':idx, 
+                  'md_date': df.loc[idx,'UTC-Date'], 
+                  'md_time': df.loc[idx,'UTC-Time'],
+                  'DIMM': df.loc[idx,'DIMM'],
+                  'N_dimm':  df.loc[idx,'N_dimm'],
+                  'MASS': df.loc[idx,'MASS'],
+                  'N_mass':  df.loc[idx,'N_mass'],
+                  'ground_layer': df.loc[idx,'Ground_Layer'],
+        }
+        df_md = df_md.append(dt_dic, ignore_index=True)
+    return df_md
 
 ################## Plotting code 
 
