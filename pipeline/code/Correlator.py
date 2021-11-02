@@ -8,6 +8,7 @@ import imageio
 import time
 import os
 import sys
+import itertools
 
 import logging
 import logging.config
@@ -15,6 +16,8 @@ import logging.config
 import pandas as pd
 import numpy as np
 from scipy.io import readsav
+import multiprocessing as mp
+import functools as fct
 
 import matplotlib.pyplot as plt
 from matplotlib import cm
@@ -28,6 +31,7 @@ from astropy.io import fits
 # Self-witten code
 from pipeline.code.corr_code import *
 from pipeline.code.corr_plots import *
+from pipeline.code.CorrClock import CorrClock
 
 
 mask_8_8_center = [[0,0,1,1,1,1,0,0],
@@ -39,6 +43,14 @@ mask_8_8_center = [[0,0,1,1,1,1,0,0],
            [0,1,1,1,1,1,1,0],
            [0,0,1,1,1,1,0,0]]
 
+mask_8_8_agg =  [[0,0,0,1,1,0,0,0],
+           [0,0,1,1,1,1,0,0],
+           [0,1,1,0,0,1,1,0],
+           [1,1,0,0,0,0,1,1],
+           [1,1,0,0,0,0,1,1],
+           [0,1,1,0,0,1,1,0],
+           [0,0,1,1,1,1,0,0],
+           [0,0,0,1,1,0,0,0]]
 
 ############################################################## 
 ####################### Correlator Class #####################
@@ -53,9 +65,11 @@ class Correlator:
         self.fits_file = None
         self.date = None
         # Variables in corr generation
+        self.clock = CorrClock()
         self.s_sub = s_sub
         self.tt_sub = tt_sub
         self.tmax = tmax
+        self.trange = None
         # This following should be reset iminently
         self.n_wfs = 5 #default value 
         self.active_wfs = [True]*self.n_wfs
@@ -179,17 +193,15 @@ class Correlator:
         out_file = self.name +"_tmax" + str(self.tmax)
         # generating file structure more finely
         if self.s_sub and self.tt_sub:
-            #out_dir = out_dir + "s_tt_sub/"
-            out_file = out_file + "_stt"
+            out_file = out_file + "_tts"
         elif self.tt_sub:
-            #out_dir = out_dir + "tt_sub/"
             out_file = out_file + "_tt"
         elif self.s_sub:
-            #out_dir = out_dir + "s_sub/"
             out_file = out_file + "_s"
         else:
-            #out_dir = out_dir + "raw/"
             out_file = out_file + "_raw"
+        if self.trange is not None:
+            out_file = out_file + f"_f{self.trange[0]}_{self.trange[1]}"
         out_file = out_file + ".fits"
         #checking to make sure this location exists
         path = self.path_check(out_dir, loud=False)
@@ -212,7 +224,7 @@ class Correlator:
         out_file = self.name 
         # generating file structure more finely
         if self.s_sub and self.tt_sub:
-            out_file = out_file + "_stt"
+            out_file = out_file + "_tts"
         elif self.tt_sub:
             out_file = out_file + "_tt"
         elif self.s_sub:
@@ -252,6 +264,25 @@ class Correlator:
             self.acor = False
             self.ccor = False
             self.fits_file = None
+            return True
+        
+    def set_trange(self, trange, loud=True):
+        """
+        Changes tmax if the requested state is new
+        This flushes the old acor and ccor as they no longer reflect the tmax val
+            args: tmax (int)
+            return: T/F (whether or not tmax val changed)
+        """
+        if trange == self.trange:
+            if loud: logging.info("trange remains: %s"%trange)
+            return False
+        else:
+            if loud: logging.info("trange now: %s" % trange)
+            self.trange = trange
+            self.acor = False
+            self.ccor = False
+            self.fits_file = None
+            self.slopes_gen()
             return True
             
     def set_pre_subs(self, s_sub = -1, tt_sub = -1, loud=True):
@@ -326,6 +357,12 @@ class Correlator:
     ## Returns if the call was successful 
     ## Some are automatically calles, and some will need to be requested
     ## Usually required for other functions
+    def hz_pull(self):
+        hdul = fits.open(self.data_file)
+        hz = hdul[1].header["FSAMPLE0"]
+        hdul.close()
+        return hz
+    
     def n_wfs_gen(self):
         try:
             # check to see if data address works
@@ -361,6 +398,10 @@ class Correlator:
                 self.date = hdulist[0].header['OBSDATE']
                 self.x_slopes = x_wfs_slopes 
                 self.y_slopes = y_wfs_slopes
+                # will cut based on t-range
+                if self.trange is not None:
+                    self.x_slopes = x_wfs_slopes[:, self.trange[0]:self.trange[1], :, :]
+                    self.y_slopes = y_wfs_slopes[:, self.trange[0]:self.trange[1], :, :]
                 # extra steps if subtracting tiptilt / statics
                 if self.tt_sub:
                     self.x_slopes, self.y_slopes = self.get_tiptilt_sub()
@@ -387,11 +428,13 @@ class Correlator:
         elif self.ccor == True:
             return self.acor_from_ccor(self, self.ccor_x, self.ccor_y)
         elif self.data_valid:
+            self.clock.acor_start() # start clock
             t_max = self.tmax
             logging.info("Generating auto corr tmax = %s" % t_max)
             self.acor_x = np.array([td_auto_corr(mat, t_max, mask) for mat in self.x_slopes])
             self.acor_y = np.array([td_auto_corr(mat, t_max, mask) for mat in self.y_slopes])
             self.acor = True
+            self.clock.acor_stop() # end clock 
             return True
         else:
             logging.warning("Data invalid, auto corr not generated")
@@ -408,7 +451,7 @@ class Correlator:
             logging.info("Cross corr already generated, tmax = %s" % self.tmax)
             return True
         elif self.data_valid:
-            self.ccor = True
+            self.clock.xcor_start() # start clock
             tmax = self.tmax
             logging.info("Generating cross corr tmax = %s" % tmax)
             x_ccor = []
@@ -433,6 +476,8 @@ class Correlator:
                 y_ccor.append(y_corr_i)
             self.ccor_x = np.array(x_ccor)
             self.ccor_y = np.array(y_ccor)
+            self.ccor = True
+            self.clock.xcor_stop() # end clock
             if not self.acor:
                 self.acor_from_ccor(self.ccor_x, self.ccor_y)
             return True
@@ -477,6 +522,121 @@ class Correlator:
         avg_xcor = np.divide(avg_xcor, count)
         return avg_xcor
     
+    ####################### Parallels #######################
+    
+    def acor_gen_par(self, mask=mask_8_8_center):
+        """
+        => parallelizing
+        If acor already calculated, does nothing
+        If ccor already calculated, uses that to populate acor
+        else, if data is valid, calculates acor
+            args: N/A
+            return: T/F (whether or not acor is generated)
+        """
+        if self.acor == True:
+            logging.info("Auto corr already generated, tmax = %s" % self.tmax)
+            return True
+        elif self.ccor == True:
+            return self.acor_from_ccor(self, self.ccor_x, self.ccor_y)
+        elif self.data_valid:
+            self.clock.acor_start(par=True) # start clock
+            t_max = self.tmax
+            td_auto_corr_set= fct.partial(td_auto_corr, mask=mask, tmax=self.tmax)
+            logging.info("Generating auto corr tmax = %s" % t_max)
+            pool = mp.Pool(self.x_slopes.shape[0])
+            self.acor_x = np.array(pool.map(td_auto_corr_set, self.x_slopes))
+            self.acor_y = np.array(pool.map(td_auto_corr_set, self.y_slopes))
+            pool.close()
+            pool.join()
+            self.acor = True
+            self.clock.acor_stop() # stop clock
+            return True
+        else:
+            logging.warning("Data invalid, auto corr not generated")
+            return False
+        
+    def ccor_gen_par(self, mask=mask_8_8_center):
+        """
+        If ccor already calculated, does nothing
+        else, if data is valid, calculates ccor, using acor vals if available
+            args: N/A
+            return: T/F (whether or not ccor is generated)
+        """
+        if self.ccor == True:
+            logging.info("Cross corr already generated, tmax = %s" % self.tmax)
+            return True
+        elif self.data_valid:
+            self.clock.xcor_start(par=True) # start clock
+            tmax = self.tmax
+            logging.info("Generating cross corr tmax = %s" % tmax)
+            
+            # setting static variables with the partial function
+            x_cross_corr_set = fct.partial(self.x_ccor_helper_par, mask=mask, tmax=self.tmax)
+            y_cross_corr_set = fct.partial(self.y_ccor_helper_par, mask=mask, tmax=self.tmax)
+            # a list of all the WFS # pairings
+            ccor_indx = list(itertools.product(range(self.n_wfs), range(self.n_wfs)))
+            
+            #print(ccor_indx)
+            
+            # mapping the set function with the list of indexes
+            pool = mp.Pool(self.x_slopes.shape[0])
+            temp_x = np.array(pool.map(x_cross_corr_set, ccor_indx))
+            temp_y = np.array(pool.map(y_cross_corr_set, ccor_indx))
+            pool.close()
+            pool.join()
+            
+            corr_shape = temp_x[0].shape
+            
+            x_ccor = np.zeros((self.n_wfs, self.n_wfs, corr_shape[0], corr_shape[1], corr_shape[2]))
+            y_ccor = np.zeros((self.n_wfs, self.n_wfs, corr_shape[0], corr_shape[1], corr_shape[2]))
+            
+            # duplicating answers for repeats
+            for ex, (i, j) in enumerate(ccor_indx):
+                if i == j:
+                    x_ccor[i, j] = temp_x[ex]
+                    y_ccor[i, j] = temp_y[ex]
+                elif i < j:
+                    x_ccor[i, j] = temp_x[ex]
+                    x_ccor[j, i] = temp_x[ex]
+                    y_ccor[i, j] = temp_y[ex]
+                    y_ccor[j, i] = temp_y[ex]
+
+            # saving
+            self.ccor_x = x_ccor
+            self.ccor_y = y_ccor
+            self.ccor = True
+            self.clock.xcor_stop() # stop clock
+            # generating acor if not already generated
+            if not self.acor:
+                self.acor_from_ccor(self.ccor_x, self.ccor_y)
+            return True
+        else:
+            logging.warning("Data invalid, cross corr not generated")
+            return False
+     
+    def x_ccor_helper_par(self, pair, tmax, mask):
+        i = pair[0]
+        j = pair[1]
+        if i == j and self.acor:
+            return self.acor_x[i]
+        elif i <= j:
+            return np.array(td_cross_corr(self.x_slopes[i], self.x_slopes[j], tmax, mask))
+        return []
+
+    def y_ccor_helper_par(self, pair, tmax, mask):
+        i = pair[0]
+        j = pair[1]
+        if i == j and self.acor:
+            return self.acor_y[i]
+        elif i <= j:
+            return np.array(td_cross_corr(self.y_slopes[i], self.y_slopes[j], tmax, mask))
+        return []
+        
+    def get_clock_time(self):
+        return self.clock.acor_time(), self.clock.xcor_time()
+    
+    def get_clock_par(self):
+        return self.clock.acor_par, self.clock.xcor_par
     
     ####################### Getting Data #######################
     ## Get functions will return you the requested data, used in graphing
@@ -591,6 +751,35 @@ class Correlator:
             y_ccor.append(y_corr_i)
         return np.array(x_ccor), np.array(y_ccor)
     
+    def data_get_cc_f_all(self, med_sub=False, avg_sub=False, avg_len=10):
+        """
+        Pulls and proccesses all cc data for graphing, filtering on active wfs
+            args: graphing inputs
+            output: x slopes ccor n_wfs array, y slopes ccor n_wfs array
+        """
+        x_ccor = []
+        y_ccor = []
+        # creating a list to run on
+        wfs_filt = [i for i, b in enumerate(self.active_wfs) if b and i<self.n_wfs]
+        for i in wfs_filt:
+            x_corr_i = []
+            y_corr_i = []
+            for j in wfs_filt:
+                if i == j and self.acor:
+                    x_acorr, y_acorr = self.data_get_cc(i,i,med_sub,avg_sub,avg_len)
+                    x_corr_i.append(x_acorr)
+                    y_corr_i.append(y_acorr)
+                elif i > j:
+                    x_corr_i.append(x_ccor[j][i])
+                    y_corr_i.append(y_ccor[j][i])
+                else:
+                    x_cc, y_cc = self.data_get_cc(i,j,med_sub,avg_sub,avg_len)
+                    x_corr_i.append(x_cc)
+                    y_corr_i.append(y_cc)   
+            x_ccor.append(x_corr_i)
+            y_ccor.append(y_corr_i)
+        return np.array(x_ccor), np.array(y_ccor)
+    
     
     ####################### FITS files #######################
     
@@ -607,7 +796,7 @@ class Correlator:
                 
         if self.fits_file:
             logging.info("---> Pulling data from fits file :  %s"% self.fits_file)
-            hdulist = fits.open(self.fits_file)
+            hdulist = fits.open(self.fits_file, ignore_missing_end=True)
             hdr = hdulist[0].header
             self.name = hdr.get('DATANAME')
             self.data_file = hdr.get('DATAFILE')
@@ -621,7 +810,11 @@ class Correlator:
             #Retrieve info from all wfs
             self.ccor = hdr.get("CCOR") 
             self.acor = hdr.get("ACOR")
-
+            #Retrieve timing infor
+            self.clock = CorrClock(acor_t=hdr.get("ACORT"), xcor_t=hdr.get("CCORT"))
+            ## get the range
+            if hdr.get("TRANGE0") is not None:
+                self.trange = (hdr.get("TRANGE0"), hdr.get("TRANGE1"))
             x_cor = np.array([])
             y_cor = np.array([])
             for i in range(self.n_wfs):
@@ -684,6 +877,12 @@ class Correlator:
         hdr['TTSUB'] = (self.tt_sub, "If global tip/tilt subtracted before comp")
         hdr["CCOR"] = (False, "Contains cross correlations")
         hdr["ACOR"] = (False, "Contains only auto correlations")
+        hdr["CCORT"] = (self.clock.xcor_time(), "Computation time")
+        hdr["ACORT"] = (self.clock.acor_time(), "Computation time")
+        ## TODO: add trange
+        if self.trange is not None:
+            hdr["TRANGE0"] = self.trange[0]
+            hdr["TRANGE1"] = self.trange[1]
         primary_hdu = fits.PrimaryHDU(header=hdr)
         hdl_list = [primary_hdu]
         ##### set up headers
@@ -753,14 +952,16 @@ class Correlator:
             retuns: title (nicely spaced string)
         """
         title = self.name + ", " + title_type + "\ntmax="+ str(self.tmax)
-        if self.s_sub:
-            title = title + ", s_sub"
         if self.tt_sub:
             title = title + ", tt_sub"
+        if self.s_sub:
+            title = title + ", s_sub"
         if med_sub:
             title = title + ", med sub len "+ str(avg_len)
         elif avg_sub:
-            title = title + ", avg sub len "+ str(avg_len) 
+            title = title + ", avg sub len "+ str(avg_len)
+        if self.trange is not None:
+            title = title + f", frame {self.trange[0]}-{self.trange[1]}"
         return title
     
     def check_t_list(self, t_list, max_t, max_len=5):
@@ -958,13 +1159,14 @@ class Correlator:
             logging.error("Data not available") 
             return None
         # Retrieve data for graphing
-        data_cx, data_cy = self.data_get_cc_all(med_sub, avg_sub, avg_len)
+        #data_cx, data_cy = self.data_get_cc_all(med_sub, avg_sub, avg_len)
+        data_cx, data_cy = self.data_get_cc_f_all(med_sub, avg_sub, avg_len)
         # Plot title and file
         title = self.plot_title_gen(" Cross Corr, all WFS", med_sub, avg_sub, avg_len)
         out_file = self.plot_file_gen("ccor_all_png", "_ccor_all", "png", med_sub, avg_sub, avg_len)       
         # graph
         try:
-            logging.debug("Graphing: graph_5_5_ccor")
+            logging.debug("Graphing: graph_5_5_ccor") 
             graph_5_5_ccor((data_cx+data_cy)/2, t, title).savefig(out_file)
             plt.close("all")
             return out_file
@@ -1004,7 +1206,6 @@ class Correlator:
         except Exception as e:
             logging.error("Error in gif_3_mat_vmin: %s"% e)
             return False
-
         
     def cor_animate_all(self, dt_max = 30, med_sub=False, avg_sub=False, avg_len=10):
         # check to see if data is valid
@@ -1016,7 +1217,8 @@ class Correlator:
             return None
         # Retrieve data for graphing
         if dt_max > self.tmax: dt_max = self.tmax
-        data_cx, data_cy = self.data_get_cc_all(med_sub, avg_sub, avg_len)
+        #data_cx, data_cy = self.data_get_cc_all(med_sub, avg_sub, avg_len)
+        data_cx, data_cy = self.data_get_cc_f_all(med_sub, avg_sub, avg_len)
         # Plot title and file
         title = self.plot_title_gen(" Cross Corr, all WFS", med_sub, avg_sub, avg_len)
         out_file = self.plot_file_gen("ccor_all_gif", "_ccor_all", "gif", med_sub, avg_sub, avg_len) 
@@ -1029,3 +1231,9 @@ class Correlator:
         except Exception as e:
             logging.error("Error in gif_ccor_mat: %s"% e)
             return False
+        
+        
+    ####################### Graphing Other #######################
+    ### Graphs of other parameters
+    
+    
