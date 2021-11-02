@@ -31,6 +31,7 @@ mask_8_8_center = [[0,0,1,1,1,1,0,0],
 def mask_data(mat):
     return mat*mask_8_8_center
 
+### Pre-Subtractions
 # Takes out the time averaged slopes from data
 def sub_data_avg(mat):
     # incoming data expected as: (t, x, y)
@@ -39,11 +40,14 @@ def sub_data_avg(mat):
 # Takes out the time averaged slopes from data
 def sub_data_t_avg(mat):
     # incoming data expected as: (t, x, y)
-    t_list = np.average(mat, axis=(1,2))
+    mask = ~np.array(mask_8_8_center, dtype=bool)
+    mask_big = np.broadcast_to(mask,(mat.shape[0],)+mask.shape)
+    mat_masked = np.ma.masked_array(mat, mask=mask_big)
+    t_list = np.ma.average(mat_masked, axis=(1,2))
     t_list = np.reshape(t_list, (len(t_list), 1, 1))
     return mat - t_list
 
-
+### Correlations
 # Two Matrix cross Correlation
 def mat_c_corr(mat_1, mat_2, mask):
     #assume mask is the same shape as mat1 and mat2
@@ -87,6 +91,7 @@ def td_cross_corr(data_mat1, data_mat2, tmax, mask):
     for ti in range(tmax):
         if ti==0:
             C = [mat_c_corr(data_mat1,data_mat2, mask)]
+            continue
         s1 = data_mat1[:-ti-1,:,:]
         #print("no shift size: ", s1.shape)
         s2 = data_mat2[ti:-1,:,:]
