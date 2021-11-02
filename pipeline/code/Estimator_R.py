@@ -55,44 +55,70 @@ for i in np.arange(0, 8):
     rad_map_boolean[i-1] = rad
 rad_map_inv = np.ones(rad_map_boolean.shape) - rad_map_boolean
 
+################# Running estimator on a CSV
+def est_csv(file, ttsub = True, **kwargs):
+    tic = time.perf_counter()
+    if not os.path.isfile(file):
+        print("could not find file")
+    df_main = pd.read_csv(file) # read in csv
+    rslt_df = df_main[df_main['ttsub'] == ttsub]
+    rslt_df = rslt_df.drop_duplicates(subset=['dataname']).sort_values(by=['dataname'])
+    fits = rslt_df["outfits"]
+    fits_in = fits.values
+    for i, ft in enumerate(fits_in):
+        est_file(ft, text = False, plot = False, prob_plot = True, **kwargs)
+        toc = time.perf_counter()
+        print(f"File {i} in {toc - tic:0.4f} seconds")
+    return
 
-################# funning estimator for one file
-def est_file(cor_f, method="meanshift",  text = True, plot = False):
+
+################# running estimator for one file
+def est_file(cor_f, method="meanshift",  text = True, plot = False, prob_plot = True, **kwargs):
     """
     Takes in arguments and access the Estimator. Passes kwargs to the function.  
     
     """
     ## TODO: set up kwargs
     ## TODO: set up multiplot access
+    detect_cpl = kwargs.get("rlab") if 'rlab' in kwargs else 5
     
     # set up corr object
     er_pipe = Estimate_simple(cor_f)
-    print(er_pipe.name)
+    if 'detect_clp' in kwargs:
+        er_pipe.detect_clp = kwargs.get("detect_clp")
     # run estimation and return table
     table = er_pipe.return_table(clstr_method = method, sdv_cnd = 2, n_filter = 20)
+    
     # deciciding where to store locations
     if text:
         # saving a text file
         plot_type = "_est_simple"
         # for a new directory with estimations
-        er_pipe.save_text(table, plot_type)
-        #saving table to this directory:
-        
+        er_pipe.save_text(table, plot_type, **kwargs)
+        #saving table to this directory:   
     if plot:
-        plot_dir = "spds"
-        plot_type = "_spds"
+        # Typical plots
+        # Detect plot
+        #plot_dir = "spds"
+        #plot_type = "_spds"
+        #fig = er_pipe.plot_spds_detect() # generate figure
+        #er_pipe.save_plot(fig) # saving a fig
+        f = er_pipe.save_plot("spds", **kwargs)
+        # Cluster plot
+        #plot_dir = "clstr"
+        #plot_type = "_clstr"
+        #fig = plot_clstr_table(table, name=er_pipe.name, min_count=er_pipe.n_filter) # generate figure
+        f = er_pipe.save_plot("clstr", **kwargs)
+        plt.close() 
+    if prob_plot:
         # generate figure
-        fig = er_pipe.plot_spds_detect()
-        # saving a text file
-        er_pipe.save_plot(fig, plot_dir, plot_type)
-        
-        # generate figure
-        plot_dir = "clstr"
-        plot_type = "_clstr"
-        fig = plot_clstr_table(table, name=er_pipe.name, min_count=er_pipe.n_filter)
-        # saving a text file
-        er_pipe.save_plot(fig, plot_dir, plot_type)
-        plt.close()
+        #plot_dir = "prob"
+        #plot_type = "prob"
+        #fig = er_pipe.plot_prob_hist()
+        #er_pipe.save_plot(fig, plot_dir, plot_type)
+        f = er_pipe.save_plot("cor_prob", **kwargs)
+        print(f)
+        plt.close() 
         
     return table
 
@@ -107,7 +133,7 @@ class Estimate_simple(object):
         self.data = Correlator("", "", "", f_file = file)
         self.name = self.data.name
         self.date = self.data.date
-        self.hz = 333 # TODO: find sampling rate
+        self.hz = fits.open(file)[1].header["FSAMPLE"] 
         # these will change each run
         self.table = pd.DataFrame()
         # auto correlation 
@@ -148,16 +174,20 @@ class Estimate_simple(object):
             self.n_filter = kwargs.get("n_filter")
         if "hz" in kwargs: 
             self.hz = kwargs.get("hz")
+            
+    def update_wfs(self, a_wfs):
+        self.data.active_wfs = a_wfs
+        return True
     
     def acor_map(self):
         data = self.data
         x_acor, y_acor = data.data_get_ac(avg_sub=False, avg_len=0)
-        avg_wfs = np.average((x_acor + y_acor)/2, axis=0)
-        return avg_wfs 
+        avg_wfs = np.average((x_acor[self.data.active_wfs] + y_acor[self.data.active_wfs])/2, axis=0)
+        return avg_wfs
         
     def xcor_map(self):
         data = self.data
-        x_cor, y_cor = data.data_get_cc_all(avg_sub=False, avg_len=0)
+        x_cor, y_cor = data.data_get_cc_f_all(avg_sub=False, avg_len=0)
         avg_cor = (x_cor + y_cor)/2
         wfs_use = data.active_wfs
         avg_xcor = np.zeros_like(avg_cor[0][0])
@@ -206,7 +236,8 @@ class Estimate_simple(object):
         avg_awfs_sub = np.subtract(avg_awfs, np.average(avg_awfs, axis = 0)) #  subtracting averages pixel value from frame
         
         ### PART 1 : determining detection levels
-        detect_lvl = detect_map(avg_awfs_sub)
+        #detect_lvl = detect_map(avg_awfs_sub)
+        detect_lvl = detect_map(avg_awfs)
         ### PART 2 : Speed Map
         dtct, spds, dirs, xs, ys = speed_map(detect_lvl, detect_clp, self.hz)
         ### PART 3: Clustering
@@ -474,13 +505,12 @@ class Estimate_simple(object):
             self.plot_spds_detect(plot_dir=plot_dir, **kwargs)
         elif plot == "clstr":
             ## cluster plot
-            self.plot_clstr(**kwargs)
+            self.plot_clstr(plot_dir=plot_dir, **kwargs)
         elif plot == "cor_prob":
             ## prob cor plot
-            pass
+            self.plot_prob_hist(plot_dir=plot_dir, **kwargs)
         elif plot == "lyr_prob":
             pass
-            
         return plot_dir
     
     ### Plotting
@@ -557,11 +587,16 @@ class Estimate_simple(object):
         return fig
     
     # Plotting histogram:
-    def plot_prob_hist(self, rmin = -25, rmax = 25, rinc = 2, rlab = 5):
+    def plot_prob_hist(self, **kwargs):
         # inputs: minimum velocity, maximum velocity, bin size, label increment
         
         #TODO: assumes you've run both acor and xcor already
-
+        #settig args
+        rmax = kwargs.get("rmax") if 'rmax' in kwargs else 25
+        rmin = kwargs.get("rmin") if 'rmin' in kwargs else -rmax
+        rinc = kwargs.get("rinc") if 'rinc' in kwargs else 2
+        rlab = kwargs.get("rlab") if 'rlab' in kwargs else 5
+        
         # generating normalization
         #TODO: assumes size of cor map
         full = speed_map(np.ones([201, 15, 15]), 0.5, self.hz)
@@ -572,7 +607,7 @@ class Estimate_simple(object):
         xv_x, xv_y = proj_xy(self.x_dirs, self.x_spds)
 
         param_title = "Detection Clip: "+ str(self.detect_clp) 
-        title = 'acor wind map, %  \n' +self.name +', ' + param_title
+        title = 'UNNormed wind map, %  \n' +self.name +', ' + param_title
         #plt.xlabel('$v_x$ (m/s)')
         #plt.ylabel('$v_y$ (m/s)') 
 
@@ -580,24 +615,32 @@ class Estimate_simple(object):
                       gridspec_kw={"width_ratios":[1,1,1, 0.05]})
         fig.subplots_adjust(wspace=0.3)
         fig.suptitle(str(title))
+        
+        bin_range = np.arange(rmin, rmax, rinc)
 
-        nH, xedges, yedges = np.histogram2d(v_x, v_y, bins=[np.arange(rmin, rmax, rinc), np.arange(rmin, rmax, rinc)])
-        aH, xedges, yedges = np.histogram2d(av_x, av_y, bins=[np.arange(rmin, rmax, rinc), np.arange(rmin, rmax, rinc)])
-        xH, xedges, yedges = np.histogram2d(xv_x, xv_y, bins=[np.arange(rmin, rmax, rinc), np.arange(rmin, rmax, rinc)])
+        nH, xedges, yedges = np.histogram2d(v_x, v_y, bins=[bin_range, bin_range])
+        aH, xedges, yedges = np.histogram2d(av_x, av_y, bins=[bin_range, bin_range])
+        xH, xedges, yedges = np.histogram2d(xv_x, xv_y, bins=[bin_range, bin_range])
 
-        am = ax.imshow(aH / nH, interpolation='nearest', origin='low',
-                    extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], cmap=plt.cm.Reds, vmin=0, vmax=1)
-        xm = ax2.imshow(xH / nH, interpolation='nearest', origin='low',
-                    extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], cmap=plt.cm.Reds, vmin=0, vmax=1)
-        m = ax3.imshow(aH/nH - xH/nH, interpolation='nearest', origin='low',
-                    extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], cmap=plt.cm.Reds, vmin=0, vmax=1)
+        am = ax.imshow(aH, interpolation='nearest', origin='low',
+                    extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], cmap=plt.cm.Reds, vmin=0, vmax=50)
+        xm = ax2.imshow(xH, interpolation='nearest', origin='low',
+                    extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], cmap=plt.cm.Reds, vmin=0, vmax=50)
+        m = ax3.imshow(aH- xH, interpolation='nearest', origin='low',
+                    extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], cmap=plt.cm.Reds, vmin=0, vmax=50)
 
         ax.set_xlabel("acor")
         ax2.set_xlabel("xcor")
         ax3.set_xlabel("sub")
 
         fig.colorbar(m, cax=cax)
-        return fig
+         # starting saves / returns
+        if 'plot_dir' in kwargs:
+            fig.savefig(kwargs.get('plot_dir'))
+            plt.close()
+            return True
+        else:    
+            return fig
         
 ############################    
 ### Generic Plotting
