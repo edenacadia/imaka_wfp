@@ -55,85 +55,31 @@ for i in np.arange(0, 8):
     rad_map_boolean[i-1] = rad
 rad_map_inv = np.ones(rad_map_boolean.shape) - rad_map_boolean
 
-################# Running estimator on a CSV
-def est_csv(file, ttsub = True, **kwargs):
-    tic = time.perf_counter()
-    if not os.path.isfile(file):
-        print("could not find file")
-    df_main = pd.read_csv(file) # read in csv
-    rslt_df = df_main[df_main['ttsub'] == ttsub]
-    rslt_df = rslt_df.drop_duplicates(subset=['dataname']).sort_values(by=['dataname'])
-    fits = rslt_df["outfits"]
-    fits_in = fits.values
-    for i, ft in enumerate(fits_in):
-        est_file(ft, text = False, plot = False, prob_plot = True, **kwargs)
-        toc = time.perf_counter()
-        print(f"File {i} in {toc - tic:0.4f} seconds")
-    return
-
-
-################# running estimator for one file
-def est_file(cor_f, method="meanshift",  text = True, plot = False, prob_plot = True, **kwargs):
-    """
-    Takes in arguments and access the Estimator. Passes kwargs to the function.  
-    
-    """
-    ## TODO: set up kwargs
-    ## TODO: set up multiplot access
-    detect_cpl = kwargs.get("rlab") if 'rlab' in kwargs else 5
-    
-    # set up corr object
-    er_pipe = Estimate_simple(cor_f)
-    if 'detect_clp' in kwargs:
-        er_pipe.detect_clp = kwargs.get("detect_clp")
-    # run estimation and return table
-    table = er_pipe.return_table(clstr_method = method, sdv_cnd = 2, n_filter = 20)
-    
-    # deciciding where to store locations
-    if text:
-        # saving a text file
-        plot_type = "_est_simple"
-        # for a new directory with estimations
-        er_pipe.save_text(table, plot_type, **kwargs)
-        #saving table to this directory:   
-    if plot:
-        # Typical plots
-        # Detect plot
-        #plot_dir = "spds"
-        #plot_type = "_spds"
-        #fig = er_pipe.plot_spds_detect() # generate figure
-        #er_pipe.save_plot(fig) # saving a fig
-        f = er_pipe.save_plot("spds", **kwargs)
-        # Cluster plot
-        #plot_dir = "clstr"
-        #plot_type = "_clstr"
-        #fig = plot_clstr_table(table, name=er_pipe.name, min_count=er_pipe.n_filter) # generate figure
-        f = er_pipe.save_plot("clstr", **kwargs)
-        plt.close() 
-    if prob_plot:
-        # generate figure
-        #plot_dir = "prob"
-        #plot_type = "prob"
-        #fig = er_pipe.plot_prob_hist()
-        #er_pipe.save_plot(fig, plot_dir, plot_type)
-        f = er_pipe.save_plot("cor_prob", **kwargs)
-        print(f)
-        plt.close() 
-        
-    return table
-
-
-
-#### 
+#########################
+#### Estimator Class ####
+#########################
 
 class Estimate_simple(object):
+    # background subtraction variables
+    bg_sub = False # by default, no bg subs
+    sub_len = 200
+    med_sub = False
+    move_sub = False
+    sig_clip = True
+    # params
+    clstr_method = "meanshift"
+    detect_clp = 4
+    sdv_comp = 3
+    sdv_cnd = 0    # by default no condensing
+    n_filter = 0   # by default no number filtering
     
     def __init__(self, file, **kwargs):
         self.out_fits = file
         self.data = Correlator("", "", "", f_file = file)
         self.name = self.data.name
         self.date = self.data.date
-        self.hz = fits.open(file)[1].header["FSAMPLE"] 
+        self.hz = fits.open(file)[1].header["FSAMPLE"] # might error for injections?
+        self.est_len = self.data.tmax # length of the estimation
         # these will change each run
         self.table = pd.DataFrame()
         # auto correlation 
@@ -150,12 +96,7 @@ class Estimate_simple(object):
         self.x_xs = None
         self.x_ys = None
         self.x_cstr = None
-        # params
-        self.clstr_method = "meanshift"
-        self.detect_clp = 4
-        self.sdv_comp = 3
-        self.sdv_cnd = 0    # by default no condensing
-        self.n_filter = 0   # by default no number filtering
+        # estimation params
         self.update_params(**kwargs)
     
     def update_params(self, **kwargs):
@@ -174,6 +115,18 @@ class Estimate_simple(object):
             self.n_filter = kwargs.get("n_filter")
         if "hz" in kwargs: 
             self.hz = kwargs.get("hz")
+        if "est_len" in kwargs: 
+            self.est_len = kwargs.get("est_len")
+        if "bg_sub" in kwargs: 
+            self.bg_sub = kwargs.get("bg_sub")
+        if "sub_len" in kwargs: 
+            self.sub_len = kwargs.get("sub_len")
+        if "med_sub" in kwargs: 
+            self.med_sub = kwargs.get("med_sub")
+        if "move_sub" in kwargs: 
+            self.move_sub = kwargs.get("move_sub")
+        if "sig_clip" in kwargs: 
+            self.sig_clip = kwargs.get("sig_clip")
             
     def update_wfs(self, a_wfs):
         self.data.active_wfs = a_wfs
@@ -181,13 +134,14 @@ class Estimate_simple(object):
     
     def acor_map(self):
         data = self.data
-        x_acor, y_acor = data.data_get_ac(avg_sub=False, avg_len=0)
-        avg_wfs = np.average((x_acor[self.data.active_wfs] + y_acor[self.data.active_wfs])/2, axis=0)
-        return avg_wfs
+        x_acor, y_acor = data.data_get_ac(sub_len=self.sub_len, bg_sub=self.bg_sub, med_sub=self.med_sub, mov_sub=self.move_sub, sig_clip=self.sig_clip)
+        avg_wfs = np.average((x_acor + y_acor)/2, axis=0)
+        ## add in 
+        return avg_wfs[:self.est_len]
         
     def xcor_map(self):
         data = self.data
-        x_cor, y_cor = data.data_get_cc_f_all(avg_sub=False, avg_len=0)
+        x_cor, y_cor = data.data_get_cc_f_all(sub_len=self.sub_len, bg_sub=self.bg_sub, med_sub=self.med_sub, mov_sub=self.move_sub, sig_clip=self.sig_clip)
         avg_cor = (x_cor + y_cor)/2
         wfs_use = data.active_wfs
         avg_xcor = np.zeros_like(avg_cor[0][0])
@@ -199,7 +153,11 @@ class Estimate_simple(object):
                     count = count + 1
         avg_xcor = np.divide(avg_xcor, count)
         return avg_xcor
-    
+
+###########################
+###### MAIN FUNCTION ######
+###########################
+
     def run(self, xcor=False, **kwargs):
         """
         Does the 3 part run for radial estimation
@@ -249,12 +207,14 @@ class Estimate_simple(object):
             self.a_xs, self.a_ys= xs, ys
             self.a_cstr = clusters
             self.a_yhat = yhat
+            self.a_d_lvl = detect_lvl
         if xcor: 
             self.x_dtct = dtct
             self.x_spds, self.x_dirs = spds, dirs
             self.x_xs, self.x_ys = xs, ys
             self.x_cstr = clusters
             self.x_yhat = yhat
+            self.x_d_lvl = detect_lvl
         return spds, dirs
     
     def return_table(self, **kwargs):
@@ -329,7 +289,7 @@ class Estimate_simple(object):
         n_filter = self.n_filter
         # based off of cluster output
         # include counts per cluster     
-        #choosing saved variables base on xcor/acor
+        # choosing saved variables base on xcor/acor
         if not xcor and self.a_dtct is None:
             self.run()
         if xcor and self.x_dtct is None:
@@ -537,8 +497,14 @@ class Estimate_simple(object):
             plt.scatter(np.degrees(self.a_dirs), self.a_spds, c="green",  alpha = .3, label="a")
         if xcor and self.x_dirs is not None:
             plt.scatter(np.degrees(self.x_dirs), self.x_spds, c="red",  alpha = .3, label="x")            
-        param_title = "Detection Clip: "+ str(self.detect_clp)
-        plt.title(self.name + ' Detections \n ' + param_title)
+        param_title = "Detection Clip: "+ str(self.detect_clp)+ ", \n"
+        if self.bg_sub:
+            param_title = param_title + "avg sub len "+ str(self.sub_len)
+            if self.move_sub:
+                param_title = param_title + ", window"
+            if self.sig_clip:
+                param_title = param_title+ ", clipped"
+        plt.title(self.name + ' Detections with ' + param_title)
         plt.ylabel('wind speed (m/s)')
         plt.xlabel('wind dir (degrees)')
         plt.legend()
@@ -704,6 +670,31 @@ def detect_map(avg_wf):
     # This results in a detection map for each cov map time slice. 
     detect_map = np.divide(np.subtract(avg_wf, t_mean), t_stdev)
     return detect_map
+
+def stdv_map(avg_wf):
+    #detect_lvl = np.zeros_like(avg_wfs)
+    t_mean = np.zeros_like(avg_wf)
+    t_stdev = np.zeros_like(avg_wf)
+
+    for t in range(avg_wf.shape[0]):
+        # 1.1.  For each pixel in the cov map assign a radius
+        t_slice = avg_wf[t]
+        sigma = 3
+        # 1.2. find the mean (m) and stddev (sd) of the pixels 
+        # in a radial annuli one pixel wide (r from 1 to 7 +/- 0.5.  
+        # I do a sigma clipping on this with a clip=3 si
+        for r in np.arange(8):
+            rad_vals = np.multiply(t_slice, rad_map_boolean[r])
+            mean, median, std = sigma_clipped_stats(rad_vals, sigma=sigma, mask=rad_map_inv[r])
+            # TRY REDOING MASKING => try to flatten?
+            #print(t, r, mean, std)
+            t_mean[t] = t_mean[t] + mean*rad_map_boolean[r]
+            t_stdev[t] = t_stdev[t] + std*rad_map_boolean[r]
+    # 1.3. For each pixel I assign a "detection level in sigma over the mean"
+    # = (im[x,y] - m)/sd.   
+    # This results in a detection map for each cov map time slice. 
+    #detect_map = np.divide(np.subtract(avg_wf, t_mean), t_stdev)
+    return t_stdev
     
     
 ##############
@@ -806,3 +797,71 @@ def speed_map(detection_map, detect_val, hz):
 # see cluster.py
     
 
+################# Running estimator on a CSV
+def est_csv(file, ttsub = True, **kwargs):
+    tic = time.perf_counter()
+    if not os.path.isfile(file):
+        print("could not find file")
+    df_main = pd.read_csv(file) # read in csv
+    rslt_df = df_main[df_main['ttsub'] == ttsub]
+    rslt_df = rslt_df.drop_duplicates(subset=['dataname']).sort_values(by=['dataname'])
+    fits = rslt_df["outfits"]
+    fits_in = fits.values
+    for i, ft in enumerate(fits_in):
+        est_file(ft, text = False, plot = False, prob_plot = True, **kwargs)
+        toc = time.perf_counter()
+        print(f"File {i} in {toc - tic:0.4f} seconds")
+    return
+
+################# running estimator for one file
+def est_file(cor_f, method="meanshift",  text = True, plot = False, prob_plot = True, **kwargs):
+    """
+    Takes in arguments and access the Estimator. Passes kwargs to the function.  
+    
+    """
+    ## TODO: set up kwargs
+    ## TODO: set up multiplot access
+    detect_cpl = kwargs.get("rlab") if 'rlab' in kwargs else 5
+    
+    # set up corr object
+    er_pipe = Estimate_simple(cor_f)
+    if 'detect_clp' in kwargs:
+        er_pipe.detect_clp = kwargs.get("detect_clp")
+    # run estimation and return table
+    table = er_pipe.return_table(clstr_method = method, sdv_cnd = 2, n_filter = 20)
+    
+    # deciciding where to store locations
+    if text:
+        # saving a text file
+        plot_type = "_est_simple"
+        # for a new directory with estimations
+        er_pipe.save_text(table, plot_type, **kwargs)
+        #saving table to this directory:   
+    if plot:
+        # Typical plots
+        # Detect plot
+        #plot_dir = "spds"
+        #plot_type = "_spds"
+        #fig = er_pipe.plot_spds_detect() # generate figure
+        #er_pipe.save_plot(fig) # saving a fig
+        f = er_pipe.save_plot("spds", **kwargs)
+        # Cluster plot
+        #plot_dir = "clstr"
+        #plot_type = "_clstr"
+        #fig = plot_clstr_table(table, name=er_pipe.name, min_count=er_pipe.n_filter) # generate figure
+        f = er_pipe.save_plot("clstr", **kwargs)
+        plt.close() 
+    if prob_plot:
+        # generate figure
+        #plot_dir = "prob"
+        #plot_type = "prob"
+        #fig = er_pipe.plot_prob_hist()
+        #er_pipe.save_plot(fig, plot_dir, plot_type)
+        f = er_pipe.save_plot("cor_prob", **kwargs)
+        print(f)
+        plt.close() 
+        
+    return table
+
+
+#### 
