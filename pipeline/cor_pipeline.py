@@ -94,9 +94,34 @@ def plot_gen_all(name, data_f, out_d, t_file=None, tmax=200, sub_len=200, avg_su
         logging.info("===> complete")
     except Exception as e:
         logging.warning("====> Data Proc error: %s", e)
+        
+        
+def plot_file_all(p_file, sub_len=200, avg_sub=True):
+    """ 
+    Generates all the useful plots, pulling from a previously created fits file
+        input: fits file, graphing parameters
+        generates: acor_avg_gif, acor_png, ccor_all_gif, ccor_all_gif
+        output: none
+    """
+    logging.info("======== %s ========" % name)
+    curr_data = Correlator("", "", "", f_file=p_file)
+    try:
+        logging.info("====> Graphing")
+        # graph acor
+        g_out = curr_data.acor_graph(t_list=[0,5,10,20,30], avg_sub=avg_sub, avg_len=sub_len)
+        logging.info(g_out)
+        g_out = curr_data.acor_animate_avg(dt_max=40, avg_sub=avg_sub, avg_len=sub_len)
+        logging.info(g_out)
+        g_out = curr_data.ccor_graph_all(avg_sub=avg_sub, avg_len=sub_len)
+        logging.info(g_out)
+        g_out = curr_data.cor_animate_all(dt_max=40, avg_sub=avg_sub, avg_len=sub_len) 
+        logging.info(g_out)
+        logging.info("===> complete")
+    except Exception as e:
+        logging.warning("====> Data Proc error: %s", e)
 
 
-def data_proc_all(name, data_f, out_d, t_file=None, tmax=200, sub_len=0, s_sub=False, tt_sub = False):
+def data_proc_all(name, data_f, out_d, t_file=None, tmax=200, sub_len=200, s_sub=False, tt_sub = False):
     """ 
     Generates correlation fits files and graphs
         input: datafile name, aocb file path, out directory, target file, correlation parameters, graphing parameters
@@ -215,9 +240,9 @@ def data_proc_ccor(name, data_f, out_d, t_file=None, tmax=200, s_sub=False, tt_s
         logging.error("====> Data Proc error: %s", e)
         
         
-## Parallel:
+########################## Parallel OPTION ###########################
         #change back tmax!! from 1000 => 200
-def data_proc_all_par(name, data_f, out_d, t_file=None, tmax=1000, sub_len=0, s_sub=False, tt_sub = False):
+def data_proc_all_par(name, data_f, out_d, t_file=None, tmax=200, sub_len=0, s_sub=False, tt_sub = False):
     """ 
     Generates correlation fits files and graphs
         input: datafile name, aocb file path, out directory, target file, correlation parameters, graphing parameters
@@ -309,6 +334,8 @@ def data_gen_par(name, data_f, out_d, t_file=None, tmax=1000, sub_len=0, s_sub=F
         logging.warning("====> Data gen pars error: %s", e)
         
         
+########################### TRANGE OPTION ###########################
+
 def trange_gen_par(name, data_f, out_d, t_file=None, tmax=1000, sub_len=0, s_sub=False, tt_sub = False, trangelen = 6000):
     """ 
     Generates correlation fits files, uses parallel functions
@@ -330,11 +357,8 @@ def trange_gen_par(name, data_f, out_d, t_file=None, tmax=1000, sub_len=0, s_sub
     #       floor div by range selected, 
     #       iterate through subsections of aocb
     
-    
     t1_lst = []
-    t2_lst = []
-    
-        
+    t2_lst = []   
     
     try:
         for t1, t2 in zip(t1_lst, t2_lst):
