@@ -227,8 +227,8 @@ def gif_ccor_mat(mat_arr, tmax, title=None, out_file='out.gif'):
             for j in range(n_width):
                 if i>=j:
                     ax = axes[i][j]
-                    #im = ax.matshow(mat_arr[i][j][t], vmin = min_val[t], vmax=max_val[t])
-                    im = ax.matshow(mat_arr[i][j][t])
+                    im = ax.matshow(mat_arr[i][j][t], vmin = min_val[t], vmax=max_val[t])
+                    #im = ax.matshow(mat_arr[i][j][t])
                     ax.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
                     ax.tick_params(axis='y', which='both', right=False, left=False, labelleft=False)
                 if i==0 and j==0:
@@ -237,3 +237,32 @@ def gif_ccor_mat(mat_arr, tmax, title=None, out_file='out.gif'):
         camera.snap()
     animation = camera.animate()  
     animation.save(out_file, writer = 'imagemagick')
+    
+    
+# simple gif two
+def gif_two(data1, data2, f_len, title, out_file):
+    ig, axes = plt.subplots(nrows=1, ncols=2, figsize=(6, 3))
+    plt.setp(axes, xticks=[], yticks=[]) # turn off tick marks
+
+    div1 = make_axes_locatable(axes[0])
+    cax1 = div1.append_axes('right', '5%', '5%')
+    div2 = make_axes_locatable(axes[-1])
+    cax2 = div2.append_axes('right', '5%', '5%')
+
+    im1 = axes[0].imshow(d1_0, origin='lower') # Here make an AxesImage rather than contour
+    im2 = axes[1].imshow(d2_0, origin='lower')
+    cb1 = fig.colorbar(im1, cax=cax1)
+    cb2 = fig.colorbar(im2, cax=cax2)
+    tx = fig.suptitle(f'{title} Step 0')
+    fig.tight_layout()
+
+    def animate(i):
+        vstd1 = np.max(data1[i])
+        im1.set_data(data1[i])
+        #im1.set_clim(-vstd1, +vstd1)
+        im2.set_data(data2[i])
+        #im2.set_clim(-vstd2, +vstd2)
+        tx.set_text(f'{title} Step {i}')
+
+    ani = animation.FuncAnimation(fig, animate, frames=f_len)
+    ani.save(out_file, writer = 'imagemagick')
