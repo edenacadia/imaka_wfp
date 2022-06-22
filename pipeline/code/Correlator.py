@@ -118,7 +118,7 @@ class Correlator:
     ### These files work with os.path functions to check for a files existence
     ### retunr based on if the request was successful or not
     
-    def data_check(self, file, loud=True):
+    def data_check(self, file, loud=False):
         """
         Tries to find file
             args: file (string)
@@ -407,6 +407,9 @@ class Correlator:
                     self.x_slopes, self.y_slopes = self.get_tiptilt_sub()
                 if self.s_sub:
                     self.x_slopes, self.y_slopes = self.get_statics_sub()
+                # keeps us from accidentially thinking we have more than we do
+                if np.array(self.x_slopes).shape[0] < self.n_wfs:
+                    self.n_wfs = np.array(self.x_slopes).shape[0]
                 return True
             else:
                 logging.warning("No valid data")
@@ -502,14 +505,14 @@ class Correlator:
             return False
         
     # for ease of use pulling data
-    def avg_acor(self, avg_sub = False, avg_len = 0):
-        x_acor, y_acor = self.data_get_ac(avg_sub=avg_sub, avg_len=avg_len)
+    def avg_acor(self, avg_sub = False, avg_len = 0, mov_sub=True, sig_clip=False):
+        x_acor, y_acor = self.data_get_ac(bg_sub=avg_sub, sub_len=avg_len, mov_sub=mov_sub, sig_clip=sig_clip)
         avg_wfs = np.average((x_acor + y_acor)/2, axis=0)
         return avg_wfs
     
-    def avg_xcor(self, avg_sub = False, avg_len = 0):
+    def avg_xcor(self, avg_sub = False, avg_len=0, mov_sub=True, sig_clip=False):
         data = self.data
-        x_cor, y_cor = self.data_get_cc_all(avg_sub=avg_sub, avg_len=avg_len)
+        x_cor, y_cor = self.data_get_cc_all(sub_len=avg_len, bg_sub=avg_sub, mov_sub=mov_sub, sig_clip=sig_clip)
         avg_cor = (x_cor + y_cor)/2
         wfs_use = self.active_wfs
         avg_xcor = np.zeros_like(avg_cor[0][0])
@@ -674,57 +677,58 @@ class Correlator:
         return False, False
     
     
-    def data_get_ac(self, med_sub=False, avg_sub=False, avg_len=10):
+    def data_get_ac(self, sub_len=10, bg_sub=False, med_sub=False, mov_sub=True, sig_clip=False):
         """
         Pulls and proccesses all auto corr data for graphing
             args: graphing inputs
             output: x slopes acor n_wfs array, y slopes acor n_wfs array
         """
         if self.data_valid and self.acor:
-            data_x = np.array([np.array([mat / 1 for mat in wfs]) for wfs in self.acor_x])
-            data_y = np.array([np.array([mat / 1 for mat in wfs]) for wfs in self.acor_y])
             #data_x = np.array([np.array([mat / mat[7,7] for mat in wfs]) for wfs in self.acor_x])
             #data_y = np.array([np.array([mat / mat[7,7] for mat in wfs]) for wfs in self.acor_y])
-            if med_sub:
-                xcor_med = np.array([running_med(wfs, avg_len) for wfs in data_x])
-                ycor_med = np.array([running_med(wfs, avg_len) for wfs in data_y])
-                data_x = data_x - xcor_med
-                data_y = data_y - ycor_med
-            elif avg_sub:
-                xcor_avg = np.array([running_avg(wfs, avg_len) for wfs in data_x])
-                ycor_avg = np.array([running_avg(wfs, avg_len) for wfs in data_y])
-                data_x = data_x - xcor_avg
-                data_y = data_y - ycor_avg
+            data_x = self.acor_x
+            data_y = self.acor_y
+            
+            if bg_sub:
+                if mov_sub: # Moving window
+                    xcor_bg=np.array([running_bg_sub(wfs, sub_len, med=med_sub, sig_clip=sig_clip) for wfs in data_x])
+                    ycor_bg=np.array([running_bg_sub(wfs, sub_len, med=med_sub, sig_clip=sig_clip) for wfs in data_y])
+                else: # General static
+                    xcor_bg=np.array([static_bg_sub(wfs, sub_len, med=med_sub, sig_clip=sig_clip) for wfs in data_x])
+                    ycor_bg=np.array([static_bg_sub(wfs, sub_len, med=med_sub, sig_clip=sig_clip) for wfs in data_y])
+                data_x = data_x - xcor_bg
+                data_y = data_y - ycor_bg
             return data_x, data_y 
         else:
             logging.warning("Error with data_get_ac: self.acor is %s, self.data_valid is %s"% (self.acor, self.data_valid))
             return None, None
     
-    def data_get_cc(self, wfs_a, wfs_b, med_sub=False, avg_sub=False, avg_len=10):
+    def data_get_cc(self, wfs_a, wfs_b, sub_len=10, bg_sub=False, med_sub=False, mov_sub=True, sig_clip=False):
         """
         Pulls and proccesses wfs_a and wfs_b cc data for graphing
             args: graphing inputs
             output: x slopes ccor wfsa/b, y slopes ccor wfsa/b
         """
         if self.data_valid and self.ccor:
-            data_x = np.array([mat / mat[7,7] for mat in self.ccor_x[wfs_a][wfs_b]])
-            data_y = np.array([mat / mat[7,7] for mat in self.ccor_y[wfs_a][wfs_b]])
-            if med_sub:
-                xcor_med = running_med(data_x, avg_len)
-                ycor_med = running_med(data_y, avg_len)
-                data_x = data_x - xcor_med
-                data_y = data_y - ycor_med
-            elif avg_sub:
-                xcor_avg = running_avg(data_x, avg_len)
-                ycor_avg = running_avg(data_y, avg_len)
-                data_x = data_x - xcor_avg
-                data_y = data_y - ycor_avg
+            #data_x = np.array([mat / mat[7,7] for mat in self.ccor_x[wfs_a][wfs_b]])
+            #data_y = np.array([mat / mat[7,7] for mat in self.ccor_y[wfs_a][wfs_b]])
+            data_x = self.ccor_x[wfs_a][wfs_b]
+            data_y = self.ccor_y[wfs_a][wfs_b]
+            if bg_sub:
+                if mov_sub: # Moving window
+                    xcor_bg = running_bg_sub(data_x, sub_len, med=med_sub, sig_clip=sig_clip)
+                    ycor_bg = running_bg_sub(data_y, sub_len, med=med_sub, sig_clip=sig_clip)
+                else: # General static
+                    xcor_bg = static_bg_sub(data_x, sub_len, med=med_sub, sig_clip=sig_clip)
+                    ycor_bg = static_bg_sub(data_y, sub_len, med=med_sub, sig_clip=sig_clip)
+                data_x = data_x - xcor_bg
+                data_y = data_y - ycor_bg
             return data_x, data_y 
         else:
             logging.warning("Error with data_get_cc: self.acor is %s, self.data_valid is %s"% (self.ccor, self.data_valid))
             return None, None
     
-    def data_get_cc_all(self, med_sub=False, avg_sub=False, avg_len=10):
+    def data_get_cc_all(self, sub_len=10, bg_sub=False, med_sub=False, mov_sub=True, sig_clip=False):
         """
         Pulls and proccesses all cc data for graphing
             args: graphing inputs
@@ -737,21 +741,21 @@ class Correlator:
             y_corr_i = []
             for j in range(self.n_wfs):
                 if i == j and self.acor:
-                    x_acorr, y_acorr = self.data_get_cc(i,i,med_sub,avg_sub,avg_len)
+                    x_acorr, y_acorr = self.data_get_cc(i,i,sub_len,bg_sub,med_sub,mov_sub,sig_clip)
                     x_corr_i.append(x_acorr)
                     y_corr_i.append(y_acorr)
                 elif i > j:
                     x_corr_i.append(x_ccor[j][i])
                     y_corr_i.append(y_ccor[j][i])
                 else:
-                    x_cc, y_cc = self.data_get_cc(i,j,med_sub,avg_sub,avg_len)
+                    x_cc, y_cc = self.data_get_cc(i,j,sub_len,bg_sub,med_sub,mov_sub,sig_clip)
                     x_corr_i.append(x_cc)
                     y_corr_i.append(y_cc)   
             x_ccor.append(x_corr_i)
             y_ccor.append(y_corr_i)
         return np.array(x_ccor), np.array(y_ccor)
     
-    def data_get_cc_f_all(self, med_sub=False, avg_sub=False, avg_len=10):
+    def data_get_cc_f_all(self, sub_len=10, bg_sub=False, med_sub=False, mov_sub=True, sig_clip=False):
         """
         Pulls and proccesses all cc data for graphing, filtering on active wfs
             args: graphing inputs
@@ -766,14 +770,14 @@ class Correlator:
             y_corr_i = []
             for j in wfs_filt:
                 if i == j and self.acor:
-                    x_acorr, y_acorr = self.data_get_cc(i,i,med_sub,avg_sub,avg_len)
+                    x_acorr, y_acorr = self.data_get_cc(i,i,sub_len,bg_sub,med_sub,mov_sub,sig_clip)
                     x_corr_i.append(x_acorr)
                     y_corr_i.append(y_acorr)
                 elif i > j:
                     x_corr_i.append(x_ccor[j][i])
                     y_corr_i.append(y_ccor[j][i])
                 else:
-                    x_cc, y_cc = self.data_get_cc(i,j,med_sub,avg_sub,avg_len)
+                    x_cc, y_cc = self.data_get_cc(i,j,sub_len,bg_sub,med_sub,mov_sub,sig_clip)
                     x_corr_i.append(x_cc)
                     y_corr_i.append(y_cc)   
             x_ccor.append(x_corr_i)
@@ -945,21 +949,29 @@ class Correlator:
     ##### avg_len = total number of images averaged over, taken half from timesteps before t, half from after
     
     
-    def plot_title_gen(self, title_type, med_sub, avg_sub, avg_len):
+    def plot_title_gen(self, title_type, med_sub, avg_sub, avg_len, running, sig_clip):
         """
         Generates a Title for a plot
             args: title_type (varies by plot func), Graphing specifications
             retuns: title (nicely spaced string)
         """
-        title = self.name + ", " + title_type + "\ntmax="+ str(self.tmax)
+        title = self.name + "\n, " + title_type + "\ntmax="+ str(self.tmax)
         if self.tt_sub:
             title = title + ", tt_sub"
         if self.s_sub:
             title = title + ", s_sub"
         if med_sub:
             title = title + ", med sub len "+ str(avg_len)
+            if running:
+                " window"
+            if sig_clip:
+                " clipped"
         elif avg_sub:
             title = title + ", avg sub len "+ str(avg_len)
+            if running:
+                " window"
+            if sig_clip:
+                " clipped"
         if self.trange is not None:
             title = title + f", frame {self.trange[0]}-{self.trange[1]}"
         return title
@@ -998,7 +1010,7 @@ class Correlator:
     ### Either a graph, or an animation
     ### Either all WFS, or their average
     
-    def acor_graph(self, t_list=[0,5,10,15,20], med_sub=False, avg_sub=False, avg_len=10):
+    def acor_graph(self, t_list=[0,5,10,15,20], med_sub=False, avg_sub=False, avg_len=10, mov_sub=True, sig_clip=False):
         """
         Create a plot of WFS acor (x, y, and xy cor) t times in t_list 
             args: graph specifications
@@ -1012,14 +1024,14 @@ class Correlator:
             logging.error("Data not available")
             return None             
         # figure out what to graph (mean_sub or avg_sub)
-        data_x, data_y = self.data_get_ac(med_sub, avg_sub, avg_len)
+        data_x, data_y = self.data_get_ac(avg_len,avg_sub,med_sub,mov_sub,sig_clip)
         # masking data, taking average over wfs axis
         x_out = np.average(data_x, axis = 0)
         y_out = np.average(data_y, axis = 0)
         # checking tmax
         t_list = self.check_t_list(t_list, x_out.shape[0])
         # generate names
-        title = self.plot_title_gen(" Auto Corr, WFS avg", med_sub, avg_sub, avg_len)
+        title = self.plot_title_gen(" Auto Corr, WFS avg", med_sub, avg_sub, avg_len, mov_sub, sig_clip)
         out_file = self.plot_file_gen("acor_png", "_acor_avg", "png", med_sub, avg_sub, avg_len)
         # graph
         mat_cube_1 = x_out
@@ -1038,7 +1050,7 @@ class Correlator:
             return False
           
         
-    def acor_animate(self, dt_max = 30, med_sub=False, avg_sub=False, avg_len=10):
+    def acor_animate(self, dt_max = 30, med_sub=False, avg_sub=False, avg_len=10, mov_sub=True, sig_clip=False):
         """
         Create an animation length dt_max, of the all WFS (x, y, xy avg)
             args: Graph specifications
@@ -1053,9 +1065,9 @@ class Correlator:
             return None       
         # retrieve data for graphing
         if dt_max > self.tmax: dt_max = self.tmax
-        data_x, data_y = self.data_get_ac(med_sub, avg_sub, avg_len)
+        data_x, data_y = self.data_get_ac(avg_len,avg_sub,med_sub,mov_sub,sig_clip)
         # Plot title and file
-        title = self.plot_title_gen(" Auto Corr, all WFS", med_sub, avg_sub, avg_len)
+        title = self.plot_title_gen(" Auto Corr, all WFS", med_sub, avg_sub, avg_len, mov_sub, sig_clip)
         out_file = self.plot_file_gen("acor_all_gif", "_acor_all", "gif", med_sub, avg_sub, avg_len)
         # graph
         label_1, label_2, label_3 = "Sx", "Sy", "Savg"
@@ -1070,7 +1082,7 @@ class Correlator:
             return None
         
         
-    def acor_animate_avg(self, dt_max = 30, med_sub=False, avg_sub=False, avg_len=10):
+    def acor_animate_avg(self, dt_max = 30, med_sub=False, avg_sub=False, avg_len=10, mov_sub=True, sig_clip=False):
         """
         Create an animation length dt_max, of the average WFS acor
             args: Graph specifications
@@ -1085,12 +1097,12 @@ class Correlator:
             return None         
         # retrieve data for graphing
         if dt_max > self.tmax: dt_max = self.tmax
-        data_x, data_y = self.data_get_ac(med_sub, avg_sub, avg_len)   
+        data_x, data_y = self.data_get_ac(avg_len,avg_sub,med_sub,mov_sub,sig_clip)   
         # averaging over valid wfs
-        x_out = np.average(data_x[self.active_wfs], axis=0)
-        y_out = np.average(data_y[self.active_wfs], axis=0)     
+        x_out = np.average(data_x[self.active_wfs[:self.n_wfs]], axis=0)
+        y_out = np.average(data_y[self.active_wfs[:self.n_wfs]], axis=0)     
         # Plot title and file
-        title = self.plot_title_gen(" Auto Corr, WFS avg", med_sub, avg_sub, avg_len)
+        title = self.plot_title_gen(" Auto Corr, WFS avg", med_sub, avg_sub, avg_len, mov_sub, sig_clip)
         out_file = self.plot_file_gen("acor_avg_gif", "_acor_avg", "gif", med_sub, avg_sub, avg_len)
         # graph
         label_1, label_2, label_3 = "Sx", "Sy", "Savg"
@@ -1109,7 +1121,7 @@ class Correlator:
     ### Either a graph, or an animation
     ### Either all WFS, or pic a specific cross correlation
         
-    def ccor_graph(self, wfs_a, wfs_b, t_list=[0,5,10,15,20], med_sub=False, avg_sub=False, avg_len=10):
+    def ccor_graph(self, wfs_a, wfs_b, t_list=[0,5,10,15,20], med_sub=False, avg_sub=False, avg_len=10, mov_sub=True, sig_clip=False):
         """
         Static plot of wfs_a and wfs_b, their xy-average slope cross corr, given timeslices in list t
             args: graphing preferences
@@ -1125,11 +1137,11 @@ class Correlator:
         # ordering wfs
         if wfs_a > wfs_b: wfs_a, wfs_b = wfs_b, wfs_a
         # retrieve data for graphing
-        data_cx, data_cy = self.data_get_cc(wfs_a, wfs_b, med_sub, avg_sub, avg_len)      
+        data_cx, data_cy = self.data_get_cc(wfs_a, wfs_b, avg_len,avg_sub,med_sub,mov_sub,sig_clip)   
         # checking tmax
         t_list = self.check_t_list(t_list, data_cx.shape[0])
         # Plot title and file
-        title = self.plot_title_gen("Cross Corr, WFS"  + str(wfs_a) + " WFS"+ str(wfs_b), med_sub, avg_sub, avg_len)
+        title = self.plot_title_gen("Cross Corr, WFS"  + str(wfs_a) + " WFS"+ str(wfs_b), med_sub, avg_sub, avg_len, move_sub, sig_clip)
         out_file = self.plot_file_gen("ccor_png", "_ccor_wfs" + str(wfs_a) + str(wfs_b), "png", med_sub, avg_sub, avg_len)
         # graph
         label_1, label_2, label_3 = "Sx", "Sy", "Savg"
@@ -1145,7 +1157,7 @@ class Correlator:
             return False
             
     
-    def ccor_graph_all(self, t=0, med_sub=False, avg_sub=False, avg_len=10):
+    def ccor_graph_all(self, t=0, med_sub=False, avg_sub=False, avg_len=10, mov_sub=True, sig_clip=False):
         """
         Graphs all wfs, their xy-average slope cross corr, given timeslice t
             args: graphing preferences
@@ -1160,9 +1172,9 @@ class Correlator:
             return None
         # Retrieve data for graphing
         #data_cx, data_cy = self.data_get_cc_all(med_sub, avg_sub, avg_len)
-        data_cx, data_cy = self.data_get_cc_f_all(med_sub, avg_sub, avg_len)
+        data_cx, data_cy = self.data_get_cc_f_all(avg_len,avg_sub,med_sub,mov_sub,sig_clip)
         # Plot title and file
-        title = self.plot_title_gen(" Cross Corr, all WFS", med_sub, avg_sub, avg_len)
+        title = self.plot_title_gen(" Cross Corr, all WFS", med_sub, avg_sub, avg_len, mov_sub, sig_clip)
         out_file = self.plot_file_gen("ccor_all_png", "_ccor_all", "png", med_sub, avg_sub, avg_len)       
         # graph
         try:
@@ -1174,7 +1186,7 @@ class Correlator:
             logging.error("Error in graph_5_5_ccor: %s"% e)
             return False
         
-    def ccor_animate(self, wfs_a, wfs_b, dt_max = 30, med_sub=False, avg_sub=False, avg_len=10):
+    def ccor_animate(self, wfs_a, wfs_b, dt_max = 30, med_sub=False, avg_sub=False, avg_len=10, mov_sub=True, sig_clip=False):
         """
         Static plot of wfs_a and wfs_b, their a, y, and xy-average slope cross corr, given timeslices in list t
             args: graphing preferences
@@ -1191,9 +1203,9 @@ class Correlator:
         if wfs_a > wfs_b: wfs_a, wfs_b = wfs_b, wfs_a
         if dt_max > self.tmax: dt_max = self.tmax
         # Retrieve data for graphing
-        data_cx, data_cy = self.data_get_cc(wfs_a, wfs_b, med_sub, avg_sub, avg_len)
+        data_cx, data_cy = self.data_get_cc(wfs_a, wfs_b, avg_len,avg_sub,med_sub,mov_sub,sig_clip)
         # Plot title and file
-        title = self.plot_title_gen(" Cross Corr, WFS"  + str(wfs_a) + " WFS"+ str(wfs_b), med_sub, avg_sub, avg_len)
+        title = self.plot_title_gen(" Cross Corr, WFS"  + str(wfs_a) + " WFS"+ str(wfs_b), med_sub, avg_sub, avg_len, mov_sub, sig_clip)
         out_file = self.plot_file_gen("ccor_gif", "_ccor_wfs" + str(wfs_a) + str(wfs_b), "gif", med_sub, avg_sub, avg_len) 
         # graph
         label_1, label_2, label_3 = "Sx", "Sy", "Savg"
@@ -1207,7 +1219,7 @@ class Correlator:
             logging.error("Error in gif_3_mat_vmin: %s"% e)
             return False
         
-    def cor_animate_all(self, dt_max = 30, med_sub=False, avg_sub=False, avg_len=10):
+    def cor_animate_all(self, dt_max = 30, med_sub=False, avg_sub=False, avg_len=10, mov_sub=True, sig_clip=False):
         # check to see if data is valid
         if self.data_valid and not self.ccor:
             logging.warning("Cross corr not available, generating")
@@ -1218,9 +1230,9 @@ class Correlator:
         # Retrieve data for graphing
         if dt_max > self.tmax: dt_max = self.tmax
         #data_cx, data_cy = self.data_get_cc_all(med_sub, avg_sub, avg_len)
-        data_cx, data_cy = self.data_get_cc_f_all(med_sub, avg_sub, avg_len)
+        data_cx, data_cy = self.data_get_cc_f_all(avg_len,avg_sub,med_sub,mov_sub,sig_clip)
         # Plot title and file
-        title = self.plot_title_gen(" Cross Corr, all WFS", med_sub, avg_sub, avg_len)
+        title = self.plot_title_gen(" Cross Corr, all WFS", med_sub, avg_sub, avg_len, mov_sub, sig_clip)
         out_file = self.plot_file_gen("ccor_all_gif", "_ccor_all", "gif", med_sub, avg_sub, avg_len) 
         # animate all correlations 
         try:
