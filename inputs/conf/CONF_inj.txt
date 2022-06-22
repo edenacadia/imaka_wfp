@@ -1,22 +1,24 @@
-# Configure file for SIMULATION
+# Configure file for INJECTED layers
 ###############################
 # Commented lines will be ignored
 # variables must be defined with " = " (spaces included)
 
-# TODO => Change data paths here
-data_path = /home/imaka/data/sim/
-out_path = /home/emcewen/out_sim/
+#### Injection file paths
+data_path = /data/emcewen/sim/injsim/
+out_path = /home/emcewen/out/injsim/
 target_path = /home/emcewen/data/target_input/
 
 #### PARALLEL vars ####
 # Parallel processing across WFS
 parallel = True
 # Multiple AOCB in parallel
-parallel_files = False
+parallel_files = True
+# injected layers
+inj_sim = True
 
 #### CORR vars ####
 # length of correlation
-tmax = 200
+tmax = 1000
 # tip-tilt pre-subtraction
 tt_sub = True
 # static pre-subtraction
@@ -35,4 +37,3 @@ med_sub = False
 # Detail type of subtraction
 mov_sub = False
 sig_clip = False
-

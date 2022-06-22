@@ -1,16 +1,37 @@
 # Configure file for DATA
-# => Change data paths here
-
+###############################
 # Commented lines will be ignored
 # variables must be defined with " = " (spaces included)
 
-# where to place files
+#### CHANGE: file paths
 data_path = /home/imaka/data/
 out_path = /home/emcewen/out/
 target_path = /home/emcewen/data/target_input/
 
-# options: all, data, plots
-pipe_fn = all
-
-# Parallel processing
+#### PARALLEL vars ####
+# Parallel processing across WFS
 parallel = True
+# Multiple AOCB in parallel
+parallel_files = False
+
+#### CORR vars ####
+# length of correlation
+tmax = 200
+# tip-tilt pre-subtraction
+tt_sub = True
+# static pre-subtraction
+s_sub = True
+# Set the range length
+trange = 0
+
+#### PLOT vars ####
+# Plotting as part of pipeline
+plotting = False
+# Backgroung subtraction length
+sub_len = 200
+# Types of subtraction 
+avg_sub = True
+med_sub = False
+# Detail type of subtraction
+mov_sub = False
+sig_clip = False
