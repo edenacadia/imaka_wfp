@@ -24,7 +24,7 @@ target_path = "../"
 pipe_f = "pipe_iteration"
 #parallel = False
 
-########################## Estimator Cluster
+########## Estimator Cluster
 # preserving old file names
 def df_iterator(df, xcor=False, sub_len=5, sig=3, thresh=3, c_size=4):
     return est.df_iterator(df, xcor=False, sub_len=5, sig=3, thresh=3, c_size=4)
@@ -33,7 +33,7 @@ def df_iterator_mult(df, sl_list, sig_list, thresh_list, c_list):
     return est.df_iterator_mult(df, sl_list, sig_list, thresh_list, c_list)
 
 
-########################## Estimator Radial
+########### Estimator Radial
 
 def df_iterator_estr(df, **kwargs):
     # TODO: set up **kwargs
