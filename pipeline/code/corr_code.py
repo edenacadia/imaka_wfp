@@ -14,6 +14,7 @@ import matplotlib as mpl
 import matplotlib.animation as animation
 from astropy.table import Table
 from astropy.stats import sigma_clip
+from astropy.stats import sigma_clipped_stats
 from astropy.io import fits
 
 mask_8_8_center = [[0,0,1,1,1,1,0,0],
@@ -103,6 +104,11 @@ def td_cross_corr(data_mat1, data_mat2, tmax, mask):
 def td_auto_corr(data_mat1, tmax, mask):
     return td_cross_corr(data_mat1,data_mat1,tmax, mask)
 
+
+################### Background subtractions ################
+
+## old
+    
 # creating a running average
 def running_avg(mat, t_avg):
     # mat should be (t, x, y)
@@ -131,4 +137,49 @@ def running_med(mat, t_avg):
         t_max = t_p if t_p <= t else t
         mat_meds[ti] = np.median(mat[t_min:t_max, :,:], axis=0)
     return mat_meds
-    
+
+def running_bg_sub(mat, t_avg, med=False, sig_clip=False):
+    # mat should be (t, x, y)
+    # we're goign to return a matrix of the same size
+    dt = t_avg
+    (t, x, y) = mat.shape
+    mat_bg = np.zeros_like(mat)
+    for ti in range(t):
+        t_m = ti-dt
+        t_p = ti+dt+1
+        t_min = t_m if t_m >= 0 else 0
+        t_max = t_p if t_p <= t else t
+        if med:
+            if sig_clip:
+                __, mat_bg[ti], __ = sigma_clipped_stats(mat[t_min:t_max, :,:], sigma=2.3, axis=0)
+            else:
+                mat_bg[ti] = np.median(mat[t_min:t_max, :,:], axis=0)
+        else:
+            if sig_clip:
+                mat_bg[ti], __, __ = sigma_clipped_stats(mat[t_min:t_max, :,:], sigma=2.3, axis=0)
+            else:
+                mat_bg[ti] = np.average(mat[t_min:t_max, :,:], axis=0)
+    return mat_bg
+
+
+def static_bg_sub(mat, t_avg, med=False, sig_clip=False):
+    # mat should be (t, x, y)
+    # taking the first t_avg to median over for the subtraction
+    # we're goign to return a matrix of the same size
+    (t, x, y) = mat.shape
+    mat_bg = np.zeros_like(mat)
+    for ti in range(t):
+        if med:
+            if sig_clip:
+                __, mat_bg[ti], __ = sigma_clipped_stats(mat[0:t_avg, :,:], sigma=2.3, axis=0)
+            else:
+                mat_bg[ti] = np.median(mat[0:t_avg, :,:], axis=0)
+        else:
+            if sig_clip:
+                mat_bg[ti], __, __ = sigma_clipped_stats(mat[0:t_avg, :,:], sigma=2.3, axis=0)
+            else:
+                mat_bg[ti] = np.average(mat[0:t_avg, :,:], axis=0)
+    return mat_bg
+
+
+
