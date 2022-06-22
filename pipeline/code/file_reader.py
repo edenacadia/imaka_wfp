@@ -111,6 +111,45 @@ def read_d(entries, data_path, out_path, target_path):
                 logging.warning("Not a dir: %s", p)
     return names, d_files, o_dirs, t_files
 
+def read_d_inj(data_path, out_path):
+    """ 
+    Knowing each input is a desired directory, finds files associated
+        input: elms (list of strings)
+        output: d_files (list of full path to data)
+                o_dirs (list of out directories for each file)
+                t_files (list of target file paths for each file)
+    """
+    names=[]
+    d_files=[]
+    o_dirs=[]
+    t_files=[]
+    target = ""
+    # if not a target file, will check to see if the dir path is available
+    p = data_path 
+    if os.path.isdir(p):
+        files = os.listdir(p) # list of files
+        ## find and add all data files
+        data =  [p + fn for fn in files if fnmatch.fnmatch(fn, '*.fits')]
+        if not data:
+            data = []
+        d_files.extend(data)
+        # create names:
+        filenames = [os.path.basename(f) for f in data]
+        split_out = [os.path.splitext(filename) for filename in filenames]
+        name_tmp = [name for name, ext in split_out]
+        names.extend(name_tmp)
+        ## create out dir
+        out_dir = out_path
+        try:
+            os.makedirs(out_dir)
+        except FileExistsError as exc:
+            pass
+        o_dirs.extend([out_dir for i in data])
+        t_files.extend([target for i in data])
+    else:
+        logging.warning("Not a dir: %s", p)
+    return names, d_files, o_dirs, t_files
+
 def read_f(entries, data_path, out_path, target_path):
     """ 
     Knowing each input is a desired files, finds files associated
@@ -171,3 +210,42 @@ def format_e(elms):
             except ValueError:
                 elms[i] = e
     return elms if len(elms)>1 else elms[0]
+
+
+######## Helper function for quickly finding aocb files
+
+def aocb_pull(DATE, suff='*o.fits'):
+    # pulling all fits given a date
+    dir_pre = f"/data/imaka/{DATE}/ao/"
+    fits_in = []
+    #check this directory is valid
+    if os.path.isdir(dir_pre):
+        files = os.listdir(dir_pre)   # list all files
+        # collect fits with right suffix
+        fits_in = [fn.replace(".fits", "") for fn in files if fnmatch.fnmatch(fn, suff)]
+    fits_in.sort()
+    return fits_in
+
+def fits_aocb_pull(DATE, suff='*o.fits'):
+    # pulling all fits given a date
+    dir_pre = f"/data/imaka/{DATE}/ao/"
+    fits_in = []
+    #check this directory is valid
+    if os.path.isdir(dir_pre):
+        files = os.listdir(dir_pre)   # list all files
+        # collect fits with right suffix
+        fits_in = [dir_pre + fn for fn in files if fnmatch.fnmatch(fn, suff)]
+    fits_in.sort()
+    return fits_in
+
+def fits_pull_dir(dir_pre, suff="*.fits"):
+    fits_in = []
+    #check this directory is valid
+    if os.path.isdir(dir_pre):
+        files = os.listdir(dir_pre)   # list all files
+        # collect fits with right suffix
+        fits_in = [dir_pre + fn for fn in files if fnmatch.fnmatch(fn, suff)]
+    fits_in.sort()
+    return fits_in
+    
+
