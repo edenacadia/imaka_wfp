@@ -86,12 +86,12 @@ def config_root_logger(dir_base=None):
                 'level': 'DEBUG',
                 'class': 'logging.StreamHandler',
                 'formatter': 'root_formatter'
-            },
-            'log_file': {
-                'class': 'logging.FileHandler',
-                'level': 'DEBUG',
-                'filename': log_file,
-                'formatter': 'root_formatter',
+            #},
+            #'log_file': {
+            #    'class': 'logging.FileHandler',
+            #    'level': 'DEBUG',
+            #    'filename': log_file,
+            #    'formatter': 'root_formatter',
             }
         },
         'loggers': {
